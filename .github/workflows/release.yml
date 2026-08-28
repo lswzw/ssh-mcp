@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: ubuntu-latest
+    env:
+      GOCACHE: /tmp/ssh-mcp-go-cache
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run tests
+        env:
+          CGO_ENABLED: 0
+        run: go test ./...
+
+      - name: Build release binaries
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          ldflags="-s -w -X main.version=${VERSION}"
+
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -buildvcs=false -ldflags="${ldflags}" \
+            -o dist/ssh-mcp-linux-amd64 ./cmd/ssh-mcp
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 \
+            go build -trimpath -buildvcs=false -ldflags="${ldflags}" \
+            -o dist/ssh-mcp-darwin-arm64 ./cmd/ssh-mcp
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
+            go build -trimpath -buildvcs=false -ldflags="${ldflags}" \
+            -o dist/ssh-mcp-windows-amd64.exe ./cmd/ssh-mcp
+
+          chmod +x dist/ssh-mcp-linux-amd64 dist/ssh-mcp-darwin-arm64
+
+      - name: Verify release binaries
+        run: |
+          set -euo pipefail
+          test -x dist/ssh-mcp-linux-amd64
+          test -x dist/ssh-mcp-darwin-arm64
+          test -f dist/ssh-mcp-windows-amd64.exe
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          token: ${{ github.token }}
+          tag_name: ${{ github.ref_name }}
+          name: ssh-mcp ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/ssh-mcp-linux-amd64
+            dist/ssh-mcp-darwin-arm64
+            dist/ssh-mcp-windows-amd64.exe
