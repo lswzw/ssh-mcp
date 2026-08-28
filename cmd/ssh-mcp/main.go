@@ -66,7 +66,7 @@ func main() {
 	}
 	if err != nil {
 		if errors.Is(err, app.ErrAlreadyRunning) {
-			log.Printf("ssh-mcp 已在运行，请先退出当前 manage 会话或 Codex MCP 会话后重试")
+			log.Printf("ssh-mcp 已在运行，请先退出当前 manage 会话或 MCP 客户端会话后重试")
 		} else {
 			log.Printf("ssh-mcp stopped: %v", err)
 		}

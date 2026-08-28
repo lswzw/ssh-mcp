@@ -4,7 +4,7 @@
 
 ## 推荐阅读路径
 
-1. [快速开始](quickstart.md)：从源码构建、打开 TUI、登记目标并连接 Codex。
+1. [快速开始](quickstart.md)：获取或构建程序、打开 TUI、登记目标并接入支持 stdio 的 MCP 客户端（含 Codex CLI 示例）。
 2. [使用指南](usage.md)：按排障、文件查看、部署和数据库任务查找示例。
 3. [目标配置](configuration.md)：填写 SSH、数据库、TLS 和文件能力配置。
 4. [MCP 工具参考](mcp-tools.md)：查看 11 个工具的参数、默认值和返回结果。

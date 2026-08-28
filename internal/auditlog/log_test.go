@@ -23,7 +23,7 @@ func TestLoggerWritesJSONLWithRedactedOperation(t *testing.T) {
 		OperationID:    "operation-123",
 		Phase:          PhaseCompleted,
 		RemoteExecuted: true,
-		Actor:          Actor{User: "kub", PID: 1234, WorkingDirectory: "/home/kub/project", Source: "codex-mcp", BridgeSessionID: "bridge-123"},
+		Actor:          Actor{User: "kub", PID: 1234, WorkingDirectory: "/home/kub/project", Source: "mcp-client", BridgeSessionID: "bridge-123"},
 		Target:         Target{Kind: "ssh", ID: "192.0.2.10"},
 		Policy:         Policy{Version: "test", Decision: "allowed", Risk: ""},
 		SSHCommand:     "MYSQL_ROOT_PASSWORD=super-secret docker compose up -d",
@@ -44,7 +44,7 @@ func TestLoggerWritesJSONLWithRedactedOperation(t *testing.T) {
 	if err := json.Unmarshal(contents, &event); err != nil {
 		t.Fatalf("audit log is not JSONL: %v", err)
 	}
-	if event.Actor.User != "kub" || event.Target.ID != "192.0.2.10" || event.Result.Status != "completed" || !event.RemoteExecuted {
+	if event.Actor.User != "kub" || event.Actor.Source != "mcp-client" || event.Target.ID != "192.0.2.10" || event.Result.Status != "completed" || !event.RemoteExecuted {
 		t.Fatalf("event = %#v", event)
 	}
 	if !strings.Contains(event.SSHCommand, "[REDACTED]") {

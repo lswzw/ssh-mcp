@@ -349,7 +349,7 @@ func currentAuditUser() string {
 }
 
 func (r *Runtime) auditActor(session bridge.Session) auditlog.Actor {
-	actor := auditlog.Actor{User: r.auditUser, Source: "codex-mcp", PID: session.PID, WorkingDirectory: session.WorkingDirectory, BridgeSessionID: session.ID}
+	actor := auditlog.Actor{User: r.auditUser, Source: "mcp-client", PID: session.PID, WorkingDirectory: session.WorkingDirectory, BridgeSessionID: session.ID}
 	if actor.User == "" {
 		actor.User = currentAuditUser()
 	}

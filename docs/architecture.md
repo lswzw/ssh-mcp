@@ -4,7 +4,7 @@
 
 ```mermaid
 flowchart TB
-    C["Codex CLI"] -->|stdio MCP| B["serve / bridge"]
+    C["MCP-compatible Agent / client"] -->|stdio MCP| B["serve / bridge"]
     B -->|本地 IPC| D["单实例 daemon"]
     T["manage / TUI"] -->|本地控制通道| D
     D --> DB["SQLite 状态与加密凭据字段"]
@@ -15,7 +15,7 @@ flowchart TB
 
 ### `serve` / bridge
 
-`serve` 为每个 Codex MCP 会话提供一条 stdio 管道。它不直接持有目标凭据，也不监听网络端口。首次实际工具调用时，bridge 会连接现有 daemon；没有 daemon 时按需启动一个。
+`serve` 为每个 MCP 客户端会话提供一条 stdio 管道。它不直接持有目标凭据，也不监听网络端口。首次实际工具调用时，bridge 会连接现有 daemon；没有 daemon 时按需启动一个。
 
 ### daemon
 
@@ -36,7 +36,7 @@ daemon 默认在实际空闲一小时后退出。退出、锁定或密钥维护�
 ## 一次请求的流程
 
 ```text
-Codex 工具请求
+MCP 客户端工具请求
     -> bridge 转发
     -> daemon 读取登记目标
     -> 检查解锁状态、目标状态、预算和本地策略

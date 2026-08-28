@@ -1,18 +1,22 @@
 # 快速开始
 
-本指南适合第一次安装 `ssh-mcp` 的用户。服务需要运行在与 Codex CLI 相同的本机上，并通过 stdio 向 Codex 提供 MCP 工具。
+本指南适合第一次安装 `ssh-mcp` 的用户。服务需要运行在 MCP Agent/客户端所在的本机上，并通过 stdio 向支持该传输方式的客户端提供 MCP 工具。
 
 ## 准备环境
 
 - Linux、macOS 或 Windows 本机。
 - Go `1.26.5`，版本以仓库 `go.mod` 为准。
-- 已安装并可以运行的 Codex CLI。
+- 已安装并可以配置本地 stdio MCP server 的 Agent/客户端（例如 Codex CLI）。
 - 可打开交互终端的桌面环境，用于运行本地 TUI。
 - 要管理的远端：Linux SSH 主机，或 MySQL/MariaDB、PostgreSQL 数据库。
 
 SSH 目标当前使用 IP、端口、账号密码和主机指纹；数据库目标使用 `IP:端口`（IPv6 使用方括号，例如 `[2001:db8::10]:5432`）。主机名、SSH 私钥/agent 和远端 Windows/macOS 命令语义不在当前支持范围内。
 
-## 构建程序
+## 获取程序
+
+有对应发布版本时，优先从 [GitHub Releases](https://github.com/lswzw/ssh-mcp/releases) 下载预编译文件；平台与文件名见 [安装与运行](installation.md#下载预编译版本)。下载后将文件放在稳定路径，Linux/macOS 需要设置执行权限。
+
+如果没有匹配的发布文件，再按下面步骤从源码构建。
 
 在仓库根目录执行：
 
@@ -38,7 +42,19 @@ make build
 
 保存成功后可按 `Esc` 返回，按 `q` 退出 TUI。目标配置只能在本地 TUI 中修改，MCP 工具不能代替这一步。
 
-## 注册到 Codex CLI
+## 接入 MCP 客户端
+
+`serve` 使用 stdio MCP。任何能启动本地 stdio MCP server 的 Agent/客户端都可以接入。按客户端的配置格式填写以下通用契约（字段名可能略有不同）：
+
+```text
+transport: stdio
+command: /absolute/path/to/bin/ssh-mcp
+args: ["serve"]
+```
+
+其中 `command` 必须是可执行文件的绝对路径；`args` 只需传入 `serve`。客户端配置完成后即可加载 `ssh-mcp` 工具。
+
+### Codex CLI 示例
 
 在仓库根目录执行：
 
@@ -47,9 +63,9 @@ codex mcp add ssh-mcp -- "$PWD/bin/ssh-mcp" serve
 codex mcp get ssh-mcp
 ```
 
-`serve` 是 stdio MCP bridge。它会在需要时连接或启动本地 daemon，不需要手动启动网络服务。
+`serve` 是 stdio MCP bridge。它会在需要时连接或启动本地 daemon，不需要手动启动网络服务。其他客户端请使用其对应的 MCP server 配置或注册命令。
 
-如果 TUI 无法自动打开终端，可先停止已有 daemon，再在注册时指定终端启动器。例如 Linux：
+如果 TUI 无法自动打开终端，可先停止已有 daemon，再在客户端配置中指定终端启动器。例如下面仍以 Codex CLI 为例（Linux）：
 
 ```bash
 ./bin/ssh-mcp stop
@@ -63,13 +79,13 @@ macOS 和 Windows 通常可以省略该环境变量，让程序自动选择系�
 
 ## 发起第一次请求
 
-在 Codex 任务中明确要求使用 MCP：
+在所用 MCP Agent/客户端的任务中明确要求使用 `ssh-mcp`：
 
 ```text
 使用 ssh-mcp 查看已登记 SSH 主机的内存和磁盘使用情况。
 ```
 
-建议让 Codex 先调用 `list_targets` 和 `describe_target_capability`，确认目标和能力后再执行操作。工具调用必须使用与 schema 一致的 JSON 对象，例如：
+建议让 Agent 先调用 `list_targets` 和 `describe_target_capability`，确认目标和能力后再执行操作。工具调用必须使用与 schema 一致的 JSON 对象，例如：
 
 ```json
 {"target":"203.0.113.10","command":"free -m"}
@@ -82,7 +98,7 @@ macOS 和 Windows 通常可以省略该环境变量，让程序自动选择系�
 ./bin/ssh-mcp stop
 ```
 
-有活动 Codex 会话时，普通 `stop` 会拒绝停止。确认要中断所有会话时，在交互终端执行：
+有活动 MCP bridge 会话时，普通 `stop` 会拒绝停止。确认要中断所有客户端会话时，在交互终端执行：
 
 ```bash
 ./bin/ssh-mcp stop --force
