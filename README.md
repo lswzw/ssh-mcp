@@ -46,7 +46,7 @@ flowchart LR
 
 把下面这句话发送给一个具备终端和文件操作权限、并能配置本地 MCP server 的 Agent：
 
-```text
+```bash
 请从 https://github.com/lswzw/ssh-mcp/releases/latest 下载适合当前系统和架构的 ssh-mcp 预编译版本，放到稳定路径并注册为当前 MCP 客户端的 stdio server（启动参数为 serve），完成后验证工具列表；如果客户端不支持本地 stdio，或需要主密码、目标登记、主机指纹确认，请提示我手动完成。
 ```
 
