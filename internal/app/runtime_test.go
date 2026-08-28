@@ -8,7 +8,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -228,18 +227,6 @@ func assertControlEndpointClosed(t *testing.T, endpoint, token string) {
 
 func waitForBridgeEndpoint(t *testing.T, endpoint string) {
 	t.Helper()
-	if runtime.GOOS != "windows" {
-		deadline := time.Now().Add(time.Second)
-		for {
-			if _, err := os.Lstat(endpoint); err == nil {
-				return
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("bridge endpoint %q did not become ready", endpoint)
-			}
-			time.Sleep(time.Millisecond)
-		}
-	}
 	deadline := time.Now().Add(time.Second)
 	for {
 		client, err := bridge.Connect(context.Background(), endpoint)
