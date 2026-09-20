@@ -673,3 +673,156 @@ func TestChangeMasterPasswordFormMasksBothPasswords(t *testing.T) {
 		t.Fatalf("master passwords appeared in maintenance view: %s", view)
 	}
 }
+
+func TestPasteInsertsPasswordAndHidesItsLength(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil)
+	model.beginUnlock()
+	model.Update(tea.PasteMsg{Content: "pasted-master-password"})
+
+	if got := model.input.Value(); got != "pasted-master-password" {
+		t.Fatalf("pasted value = %q", got)
+	}
+	if model.notice != pasteSecretNotice {
+		t.Fatalf("notice = %q, want %q", model.notice, pasteSecretNotice)
+	}
+	if strings.ContainsAny(model.notice, "0123456789") {
+		t.Fatalf("secret notice discloses a length: %q", model.notice)
+	}
+	view := model.View().Content
+	if strings.Contains(view, "pasted-master-password") {
+		t.Fatalf("pasted password appeared in view: %s", view)
+	}
+	if got := strings.Count(model.input.View(), "*"); got != len("pasted-master-password") {
+		t.Fatalf("masked count = %d, want %d", got, len("pasted-master-password"))
+	}
+}
+
+func TestPasteReportsLengthOnlyForNonSecretFields(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil)
+	model.beginSSHForm(store.SSHTarget{IP: "192.0.2.10", Mode: store.SSHDirect})
+	// A paste inserts at the cursor instead of replacing the field, and the
+	// form prefills the stored value, so start from an empty input here.
+	model.input.SetValue("")
+	model.Update(tea.PasteMsg{Content: "192.0.2.20"})
+
+	if got := model.input.Value(); got != "192.0.2.20" {
+		t.Fatalf("pasted value = %q", got)
+	}
+	if !strings.Contains(model.notice, "10") {
+		t.Fatalf("notice = %q, want the pasted length", model.notice)
+	}
+}
+
+func TestPasteTrimsSurroundingWhitespace(t *testing.T) {
+	t.Parallel()
+
+	// A password manager and a browser selection both tend to copy a trailing
+	// newline, which would otherwise be folded into the value as a space.
+	for _, content := range []string{"\nsecret\n", "  secret\t", " secret ", "　secret　"} {
+		model := NewModel(nil)
+		model.beginUnlock()
+		model.Update(tea.PasteMsg{Content: content})
+		if got := model.input.Value(); got != "secret" {
+			t.Fatalf("paste %q produced %q", content, got)
+		}
+	}
+}
+
+func TestPasteRejectionsLeaveInputUntouched(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		content string
+		notice  string
+	}{
+		{"empty", "", pasteEmptyNotice},
+		{"whitespace only", " \n\t ", pasteEmptyNotice},
+		{"inner space", "paste d secret", pasteWhitespaceNotice},
+		{"inner newline", "line\nline", pasteWhitespaceNotice},
+		{"inner non-breaking space", "paste d", pasteWhitespaceNotice},
+		{"over secret limit", strings.Repeat("a", maxSecretPasteRunes+1), pasteTooLongNotice},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			model := NewModel(nil)
+			model.beginUnlock()
+			model.input.SetValue("kept")
+
+			model.Update(tea.PasteMsg{Content: test.content})
+
+			if got := model.input.Value(); got != "kept" {
+				t.Fatalf("input value = %q, want the rejected paste to leave it alone", got)
+			}
+			if model.notice != test.notice {
+				t.Fatalf("notice = %q, want %q", model.notice, test.notice)
+			}
+		})
+	}
+}
+
+func TestPasteLimitsSecretAndTextFieldsDifferently(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil)
+	model.beginUnlock()
+	model.Update(tea.PasteMsg{Content: strings.Repeat("a", maxSecretPasteRunes)})
+	if got := model.input.Value(); len(got) != maxSecretPasteRunes {
+		t.Fatalf("secret paste at the limit was rejected: len = %d", len(got))
+	}
+
+	model = NewModel(nil)
+	model.beginSSHForm(store.SSHTarget{IP: "192.0.2.10", Mode: store.SSHDirect})
+	model.input.SetValue("")
+	model.Update(tea.PasteMsg{Content: strings.Repeat("b", maxTextPasteRunes)})
+	if got := model.input.Value(); len(got) != maxTextPasteRunes {
+		t.Fatalf("text paste at the limit was rejected: len = %d", len(got))
+	}
+	model.Update(tea.PasteMsg{Content: strings.Repeat("c", maxTextPasteRunes+1)})
+	if model.notice != pasteTooLongNotice {
+		t.Fatalf("notice = %q, want %q", model.notice, pasteTooLongNotice)
+	}
+}
+
+func TestPasteShortcutKeysExplainTerminalPaste(t *testing.T) {
+	t.Parallel()
+
+	// Neither key can paste on its own: insert is consumed by most terminals,
+	// and ctrl+v would read the host clipboard, whose result cannot surface.
+	for _, key := range []tea.KeyPressMsg{
+		{Code: tea.KeyInsert},
+		{Code: tea.KeyInsert, Mod: tea.ModShift},
+		{Code: 'v', Mod: tea.ModCtrl},
+	} {
+		model := NewModel(nil)
+		model.beginUnlock()
+		model.input.SetValue("kept")
+
+		model.handleKey(key)
+
+		if model.notice != pasteHintNotice {
+			t.Fatalf("key %q notice = %q, want %q", key.String(), model.notice, pasteHintNotice)
+		}
+		if got := model.input.Value(); got != "kept" {
+			t.Fatalf("key %q changed the input to %q", key.String(), got)
+		}
+	}
+}
+
+func TestPasteOutsideInputScreensIsIgnored(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil)
+	model.Update(tea.PasteMsg{Content: "pasted-without-an-input"})
+
+	if got := model.input.Value(); got != "" {
+		t.Fatalf("input value = %q, want empty", got)
+	}
+	if model.notice != "" {
+		t.Fatalf("notice = %q, want empty", model.notice)
+	}
+}

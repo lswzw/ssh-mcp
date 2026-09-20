@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -137,6 +138,20 @@ const (
 	minInputWidth        = 20
 	inputLinePrefix      = "> "
 	contentHorizontalPad = 2
+
+	// A paste arrives as one opaque blob, so it is validated before it reaches
+	// the input: a clipboard can carry a trailing newline, an accidentally
+	// copied paragraph, or nothing at all.
+	maxSecretPasteRunes = 256
+	maxTextPasteRunes   = 1024
+)
+
+const (
+	pasteHintNotice       = "请使用终端粘贴：Shift+Ins 或 Cmd+V。"
+	pasteEmptyNotice      = "粘贴内容为空。"
+	pasteWhitespaceNotice = "粘贴内容包含空白字符，已忽略。"
+	pasteTooLongNotice    = "粘贴内容超过长度上限，已忽略。"
+	pasteSecretNotice     = "已粘贴。"
 )
 
 func (m *Model) Init() tea.Cmd {
@@ -156,6 +171,10 @@ func (m *Model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.applyRPC(value)
 	case tea.KeyMsg:
 		return m, m.handleKey(value)
+	case tea.PasteMsg:
+		// Terminal-driven paste is the only supported paste path. It does not
+		// read the host clipboard, so it also works over an SSH session.
+		return m, m.handlePaste(value.Content)
 	}
 	return m, nil
 }
@@ -334,9 +353,83 @@ func (m *Model) updateInput(message tea.Msg) tea.Cmd {
 		key.Text = string(key.Code)
 		message = key
 	}
+	// Neither shortcut is forwarded. ctrl+v would make the text input read the
+	// host clipboard, whose result cannot be handled upstream, and insert only
+	// reaches us when a terminal does not translate it into a paste by itself.
+	// Both answer instead of failing silently.
+	if key, ok := message.(tea.KeyPressMsg); ok && isPasteShortcut(key) {
+		m.notice = pasteHintNotice
+		return nil
+	}
 	var command tea.Cmd
 	m.input, command = m.input.Update(message)
 	return command
+}
+
+// isPasteShortcut reports keys whose intended result is a paste this program
+// cannot perform on its own. Insert is matched without its modifiers because
+// most terminals consume it, and those that forward it often drop the shift
+// bit, so requiring "shift+insert" would silently fail on those terminals.
+func isPasteShortcut(key tea.KeyPressMsg) bool {
+	return key.Code == tea.KeyInsert || key.String() == "ctrl+v"
+}
+
+// handlePaste inserts text delivered by the terminal's bracketed-paste mode.
+// Unlike typed input, a pasted payload cannot be reviewed character by
+// character, so anything that is not a plausible single field value is
+// rejected with a notice and leaves the input untouched.
+func (m *Model) handlePaste(content string) tea.Cmd {
+	switch m.screen {
+	case screenUnlock, screenForm, screenMaintenance:
+	default:
+		return nil
+	}
+	// unicode.IsSpace also covers the non-breaking and ideographic spaces that
+	// browsers and password managers leave behind in copied text.
+	trimmed := strings.TrimSpace(content)
+	switch {
+	case trimmed == "":
+		m.notice = pasteEmptyNotice
+		return nil
+	case strings.ContainsFunc(trimmed, unicode.IsSpace):
+		m.notice = pasteWhitespaceNotice
+		return nil
+	}
+	limit := maxTextPasteRunes
+	secret := m.activeSecretField()
+	if secret {
+		limit = maxSecretPasteRunes
+	}
+	count := utf8.RuneCountInString(trimmed)
+	if count > limit {
+		// The rejected length is deliberately not reported: on a secret field
+		// it would disclose how long the password is.
+		m.notice = pasteTooLongNotice
+		return nil
+	}
+	var command tea.Cmd
+	m.input, command = m.input.Update(tea.PasteMsg{Content: trimmed})
+	if secret {
+		m.notice = pasteSecretNotice
+	} else {
+		m.notice = fmt.Sprintf("已粘贴 %d 个字符。", count)
+	}
+	return command
+}
+
+// activeSecretField reports whether the focused input holds a secret. Secret
+// fields never report a pasted length, because the length is itself a small
+// disclosure about a value the interface otherwise never reveals.
+func (m *Model) activeSecretField() bool {
+	switch m.screen {
+	case screenUnlock:
+		return true
+	case screenForm:
+		return m.form != nil && m.form.index < len(m.form.fields) && m.form.fields[m.form.index].secret
+	case screenMaintenance:
+		return m.maintenance != nil && m.maintenance.index < len(m.maintenance.fields) && m.maintenance.fields[m.maintenance.index].secret
+	}
+	return false
 }
 
 func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
@@ -479,7 +572,7 @@ func (m *Model) View() tea.View {
 	}
 	switch m.screen {
 	case screenUnlock:
-		lines = append(lines, "输入主密码", m.input.View(), "", "Enter 解锁  Esc 返回")
+		lines = append(lines, "输入主密码", m.input.View(), "", "Enter 解锁  Esc 返回  Shift+Ins 粘贴")
 	case screenTargets:
 		lines = append(lines, m.renderTargets()...)
 	case screenForm:
@@ -692,7 +785,7 @@ func (m *Model) renderForm() []string {
 		field := m.form.fields[m.form.index]
 		lines = append(lines, fmt.Sprintf("%d/%d  %s", m.form.index+1, len(m.form.fields), compactText(field.label, max(1, m.contentWidth()-6))))
 		lines = append(lines, inputLinePrefix+m.input.View())
-		return append(lines, "", "Tab 字段  Ctrl+S 保存", "Esc 取消")
+		return append(lines, "", "Tab 字段  Ctrl+S 保存", "Esc 取消  Shift+Ins 粘贴")
 	}
 	for index, field := range m.form.fields {
 		value := field.value
@@ -708,7 +801,7 @@ func (m *Model) renderForm() []string {
 			lines = append(lines, "  "+field.label+"："+value)
 		}
 	}
-	lines = append(lines, "", "Tab/Enter 切换字段    Ctrl+S 保存    Esc 取消")
+	lines = append(lines, "", "Tab/Enter 切换字段    Ctrl+S 保存    Esc 取消    Shift+Ins 粘贴")
 	return lines
 }
 
@@ -765,7 +858,7 @@ func (m *Model) renderMaintenance() []string {
 			lines = append(lines, "  "+field.label+"："+value)
 		}
 	}
-	lines = append(lines, "", "Tab/Enter 切换字段    Ctrl+S 确认    Esc 取消")
+	lines = append(lines, "", "Tab/Enter 切换字段    Ctrl+S 确认    Esc 取消    Shift+Ins 粘贴")
 	return lines
 }
 
