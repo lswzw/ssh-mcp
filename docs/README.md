@@ -1,6 +1,8 @@
 # ssh-mcp 文档
 
-这里的文档按“先运行、再配置、再深入”组织。项目首页请看仓库根目录的 [README](../README.md)。
+[English Documentation](en/README.md) | [中文文档](README.md)
+
+这里的文档按“先运行、再配置、再深入”组织。项目首页请看仓库根目录的 [README](../README.md) 与 [README_EN](../README_EN.md)。
 
 ## 推荐阅读路径
 

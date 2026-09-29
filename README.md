@@ -2,6 +2,8 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
+[English Documentation](README_EN.md) | [中文说明](README.md)
+
 **Local SSH MCP server for MCP-compatible agents | 面向 AI 运维的本地 MCP 桥接服务**
 
 `ssh-mcp` 是一个可供 **支持 MCP 的 AI Agent/客户端使用的本地 SSH MCP server**，通过 **Model Context Protocol (MCP) over stdio** 让 AI 使用你在本机登记的 Linux SSH 主机、MySQL/MariaDB 和 PostgreSQL 数据库，完成排障、查询、文件查看和文件部署。
