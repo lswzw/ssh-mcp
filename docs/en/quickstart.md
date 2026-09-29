@@ -49,11 +49,12 @@ Before your AI agent can perform operations, you must initialize the local encry
 In the interactive TUI console, follow these steps:
 
 1. **Unlock/Initialize Vault**: Press `u` to set your master password and initialize the credential vault. (On first run, this creates the local SQLite metadata database and encrypted key container).
-2. **Open Targets List**: Press `t` to view targets.
-3. **Add Target**: Press `n` to add an SSH host, or `d` to add a database target.
-4. **Input Details & Save**: Fill in the target IP, port, and credentials, then press `Ctrl+S`. `ssh-mcp` will test the connection immediately.
-5. **Pin Host Fingerprint (SSH)**: On the first connection to an SSH host, review the displayed fingerprint and press `y` to confirm and pin it.
-6. **Exit Console**: Press `Esc` to return and `q` to quit the TUI.
+2. **Toggle Language (Optional)**: Press `e` on the dashboard to toggle between English and Chinese interface language. Your preference is automatically persisted in the local database.
+3. **Open Targets List**: Press `t` to view targets.
+4. **Add Target**: Press `n` to add an SSH host, or `d` to add a database target.
+5. **Input Details & Save**: Fill in the target IP, port, and credentials, then press `Ctrl+S`. `ssh-mcp` will test the connection immediately.
+6. **Pin Host Fingerprint (SSH)**: On the first connection to an SSH host, review the displayed fingerprint and press `y` to confirm and pin it.
+7. **Exit Console**: Press `Esc` to return and `q` to quit the TUI.
 
 > [!IMPORTANT]
 > Target credentials and host keys can **only** be configured via the local TUI. The MCP client and AI agents have no administrative ability to register, alter, or delete targets.

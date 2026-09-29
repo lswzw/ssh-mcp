@@ -78,6 +78,7 @@ The TUI provides built-in vault management commands:
 - **`k`**: Rotate data encryption key (requires typing `ROTATE`).
 - **`b`**: Export an encrypted vault backup.
 - **`o`**: Restore vault from an encrypted backup file.
+- **`e`**: Toggle TUI interface language between English and Chinese (`en` / `zh`), persisted automatically across sessions.
 
 > [!WARNING]
 > If you lose your master password, the encrypted credentials cannot be recovered by the MCP server or agent. Always store your master password in a password manager and maintain encrypted backups.

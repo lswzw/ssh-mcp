@@ -2164,3 +2164,48 @@ func assertCandidateAuditEvent(t *testing.T, event auditlog.Event, phase, target
 		t.Fatalf("candidate audit event unexpectedly carries operation content: %#v", event)
 	}
 }
+
+func TestServiceReportsAndUpdatesTUILanguage(t *testing.T) {
+	t.Parallel()
+
+	credentialStore, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer credentialStore.Close()
+
+	service := NewService(credentialStore, session.NewManager(credentialStore))
+
+	// Initial status has empty language
+	status := callService[Status](t, service, "status", nil)
+	if status.Language != "" {
+		t.Fatalf("initial status language = %q, want empty", status.Language)
+	}
+
+	// Update to en
+	callService[struct{}](t, service, "tui.set_language", SetTUILanguageParams{Language: "en"})
+	status = callService[Status](t, service, "status", nil)
+	if status.Language != "en" {
+		t.Fatalf("status language after en = %q, want en", status.Language)
+	}
+
+	// Verify directly in store
+	lang, err := credentialStore.GetTUILanguage(context.Background())
+	if err != nil || lang != "en" {
+		t.Fatalf("store language = %q, err = %v, want en", lang, err)
+	}
+
+	// Update to zh
+	callService[struct{}](t, service, "tui.set_language", SetTUILanguageParams{Language: "zh"})
+	status = callService[Status](t, service, "status", nil)
+	if status.Language != "zh" {
+		t.Fatalf("status language after zh = %q, want zh", status.Language)
+	}
+
+	// Invalid language fails with ipc.ErrInvalidRequest
+	encoded, _ := json.Marshal(SetTUILanguageParams{Language: "de"})
+	if _, err := service.Handle(context.Background(), "tui.set_language", encoded); !errors.Is(err, ipc.ErrInvalidRequest) {
+		t.Fatalf("set language with invalid value error = %v, want ipc.ErrInvalidRequest", err)
+	}
+}
+

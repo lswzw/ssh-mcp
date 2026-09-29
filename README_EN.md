@@ -18,10 +18,10 @@ It enables AI agents to execute troubleshooting commands, inspect log files, que
 
 ## Console Preview
 
-![ssh-mcp local TUI console](docs/assets/console-overview.png)
+![ssh-mcp local TUI console](docs/assets/console-overview-en.png)
 *Local TUI management console (demonstration data).*
 
-![ssh-mcp credential unlock screen](docs/assets/console-dashboard.png)
+![ssh-mcp credential unlock screen](docs/assets/console-dashboard-en.png)
 *Local master password unlock screen protecting the credential vault.*
 
 ---
@@ -113,11 +113,12 @@ Launch the local console:
 ```
 Follow the on-screen keys:
 1. Press `u` to set a master password and unlock the credential vault (this initializes the local database on first run).
-2. Press `t` to open the Targets list.
-3. Press `n` to add an SSH host, or `d` to add a database target.
-4. Enter target credentials and press `Ctrl+S`. `ssh-mcp` will test connectivity.
-5. For SSH hosts, verify the displayed host fingerprint and press `y` to confirm and pin it.
-6. Press `Esc` to return and `q` to exit.
+2. (Optional) Press `e` on the dashboard to toggle between English and Chinese interface language. Your preference is automatically persisted in the local database.
+3. Press `t` to open the Targets list.
+4. Press `n` to add an SSH host, or `d` to add a database target.
+5. Enter target credentials and press `Ctrl+S`. `ssh-mcp` will test connectivity.
+6. For SSH hosts, verify the displayed host fingerprint and press `y` to confirm and pin it.
+7. Press `Esc` to return and `q` to exit.
 
 ---
 

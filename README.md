@@ -70,7 +70,7 @@ make build
 ./bin/ssh-mcp manage
 ```
 
-首次打开 TUI 时设置主密码，然后添加并验证 SSH 或数据库目标。验证完成后，按所用 Agent/客户端的配置格式接入 stdio MCP server。通用配置契约如下（字段名可能因客户端而异）：
+首次打开 TUI 时设置主密码，然后添加并验证 SSH 或数据库目标（主页按 `e` 可在中文与英文界面之间切换，偏好会自动持久化保存）。验证完成后，按所用 Agent/客户端的配置格式接入 stdio MCP server。通用配置契约如下（字段名可能因客户端而异）：
 
 ```text
 transport: stdio

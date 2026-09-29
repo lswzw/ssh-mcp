@@ -4,7 +4,6 @@ package tui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -119,6 +118,9 @@ type Model struct {
 	maintenance *maintenanceForm
 	pending     *pendingTargetSave
 	deleting    *pendingTargetDelete
+
+	lang string
+	msg  *Messages
 }
 
 type rpcMsg struct {
@@ -130,7 +132,32 @@ type rpcMsg struct {
 func NewModel(client Caller) *Model {
 	input := textinput.New()
 	input.SetWidth(defaultInputWidth)
-	return &Model{client: client, input: input}
+	return &Model{client: client, input: input, lang: "zh", msg: messagesZH}
+}
+
+func (m *Model) setLanguage(lang string) {
+	if lang != "en" {
+		lang = "zh"
+	}
+	m.lang = lang
+	m.msg = getMessages(lang)
+	if m.screen == screenUnlock {
+		m.input.Prompt = m.msg.UnlockPrompt
+	}
+}
+
+func (m *Model) toggleLanguage() tea.Cmd {
+	next := "en"
+	if m.lang == "en" {
+		next = "zh"
+	}
+	m.setLanguage(next)
+	if next == "en" {
+		m.notice = m.msg.LanguageSwitchedENNotice
+	} else {
+		m.notice = m.msg.LanguageSwitchedZHNotice
+	}
+	return m.call("language_set", "tui.set_language", control.SetTUILanguageParams{Language: next}, &struct{}{})
 }
 
 const (
@@ -203,6 +230,8 @@ func (m *Model) handleKey(message tea.KeyMsg) tea.Cmd {
 			m.beginMaintenance(maintenanceChangeMasterPassword)
 		case "l":
 			return m.call("locked", "lock", nil, &struct{}{})
+		case "e":
+			return m.toggleLanguage()
 		}
 	case screenUnlock:
 		if key == "esc" {
@@ -317,7 +346,7 @@ func (m *Model) handleFingerprintConfirmation(key string) tea.Cmd {
 	case "y":
 		params, ok := confirmedFingerprintParams(m.pending.testParams, m.pending.fingerprint)
 		if !ok {
-			m.notice = "指纹确认请求无效。"
+			m.notice = m.msg.FingerprintInvalidRequest
 			return nil
 		}
 		m.pending.testParams = params
@@ -325,7 +354,7 @@ func (m *Model) handleFingerprintConfirmation(key string) tea.Cmd {
 	case "n", "esc":
 		m.clearPendingTarget()
 		m.screen = screenForm
-		m.notice = "未确认 SSH 主机指纹，目标未保存。"
+		m.notice = m.msg.FingerprintNotConfirmedNotice
 	}
 	return nil
 }
@@ -341,7 +370,7 @@ func (m *Model) handleTargetDeleteConfirmation(key string) tea.Cmd {
 	case "n", "esc":
 		m.deleting = nil
 		m.screen = screenTargets
-		m.notice = "已取消删除目标。"
+		m.notice = m.msg.DeleteCancelledNotice
 	}
 	return nil
 }
@@ -358,7 +387,7 @@ func (m *Model) updateInput(message tea.Msg) tea.Cmd {
 	// reaches us when a terminal does not translate it into a paste by itself.
 	// Both answer instead of failing silently.
 	if key, ok := message.(tea.KeyPressMsg); ok && isPasteShortcut(key) {
-		m.notice = pasteHintNotice
+		m.notice = m.msg.PasteHint
 		return nil
 	}
 	var command tea.Cmd
@@ -389,10 +418,10 @@ func (m *Model) handlePaste(content string) tea.Cmd {
 	trimmed := strings.TrimSpace(content)
 	switch {
 	case trimmed == "":
-		m.notice = pasteEmptyNotice
+		m.notice = m.msg.PasteEmpty
 		return nil
 	case strings.ContainsFunc(trimmed, unicode.IsSpace):
-		m.notice = pasteWhitespaceNotice
+		m.notice = m.msg.PasteWhitespace
 		return nil
 	}
 	limit := maxTextPasteRunes
@@ -404,15 +433,15 @@ func (m *Model) handlePaste(content string) tea.Cmd {
 	if count > limit {
 		// The rejected length is deliberately not reported: on a secret field
 		// it would disclose how long the password is.
-		m.notice = pasteTooLongNotice
+		m.notice = m.msg.PasteTooLong
 		return nil
 	}
 	var command tea.Cmd
 	m.input, command = m.input.Update(tea.PasteMsg{Content: trimmed})
 	if secret {
-		m.notice = pasteSecretNotice
+		m.notice = m.msg.PasteSecret
 	} else {
-		m.notice = fmt.Sprintf("已粘贴 %d 个字符。", count)
+		m.notice = m.msg.PastedRunesCount(count)
 	}
 	return command
 }
@@ -437,13 +466,16 @@ func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
 		if message.action == "target_tested" || message.action == "database_tested" {
 			m.clearPendingTarget()
 		}
-		m.notice = localControlErrorNotice(message.action, message.err)
+		m.notice = m.msg.LocalControlErrorNotice(message.action, message.err)
 		return nil
 	}
 	m.notice = ""
 	switch message.action {
 	case "status":
 		m.status = message.value.(control.Status)
+		if m.status.Language != "" && m.status.Language != m.lang {
+			m.setLanguage(m.status.Language)
+		}
 	case "targets":
 		m.targets = message.value.(control.TargetsResult)
 		m.clampSelected(m.targetCount())
@@ -453,13 +485,13 @@ func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
 		m.status.Initialized = true
 		m.screen = screenDashboard
 		if result.Created {
-			m.notice = "已创建并解锁本地凭据库。"
+			m.notice = m.msg.UnlockCreatedNotice
 		} else {
-			m.notice = "已解锁本地凭据库。"
+			m.notice = m.msg.UnlockSuccessNotice
 		}
 	case "locked":
 		m.status.Unlocked = false
-		m.notice = "本地凭据库已锁定。"
+		m.notice = m.msg.LockedNotice
 	case "target_saved":
 		m.clearPendingTarget()
 		m.clearForm()
@@ -475,7 +507,7 @@ func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
 		result := message.value.(control.SSHTestResult)
 		if result.RequiresFingerprintConfirmation {
 			if m.pending == nil {
-				m.notice = "找不到待保存目标。"
+				m.notice = m.msg.PendingTargetNotFound
 				return nil
 			}
 			m.pending.fingerprint = result.Fingerprint
@@ -483,12 +515,12 @@ func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
 			return nil
 		}
 		if m.pending == nil {
-			m.notice = "找不到待保存目标。"
+			m.notice = m.msg.PendingTargetNotFound
 			return nil
 		}
 		params, ok := m.pending.saveParams.(control.UpsertSSHTargetParams)
 		if !ok {
-			m.notice = "SSH 测试请求无效。"
+			m.notice = m.msg.SSHTestRequestInvalid
 			return nil
 		}
 		params.ConfirmedFingerprint = result.Fingerprint
@@ -496,12 +528,12 @@ func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
 		return m.savePendingTarget()
 	case "database_tested":
 		if m.pending == nil {
-			m.notice = "找不到待保存目标。"
+			m.notice = m.msg.PendingTargetNotFound
 			return nil
 		}
 		params, ok := m.pending.saveParams.(control.UpsertDatabaseInstanceParams)
 		if !ok {
-			m.notice = "数据库测试请求无效。"
+			m.notice = m.msg.DBTestRequestInvalid
 			return nil
 		}
 		params.Instance.TransportSecurity = message.value.(control.DatabaseTestResult).TransportSecurity
@@ -510,59 +542,15 @@ func (m *Model) applyRPC(message rpcMsg) tea.Cmd {
 	case "maintenance_done":
 		m.clearMaintenance()
 		m.screen = screenDashboard
-		m.notice = "维护操作已完成。"
+		m.notice = m.msg.MaintenanceDoneNotice
+	case "language_set":
+		// language preference saved
 	}
 	return nil
 }
 
 func localControlErrorNotice(action string, err error) string {
-	switch {
-	case errors.Is(err, ipc.ErrUnauthorized):
-		return "本地控制台授权已失效，请重新打开控制台后再操作。"
-	case errors.Is(err, ipc.ErrLocked):
-		return "本地凭据库已锁定，候选验证和保存均未执行。请先返回主页按 u 解锁后重试。"
-	case errors.Is(err, ipc.ErrCandidateNotDispatched):
-		return "候选验证未派发：本地服务正处于锁定、维护或停止派发状态，配置未保存。请完成当前维护或解锁后重试。"
-	case errors.Is(err, ipc.ErrCandidateAuditWriteFailed):
-		return "候选配置未保存：本地审计记录写入失败。请检查本机状态库的可写性和磁盘空间后重试。"
-	case errors.Is(err, ipc.ErrConfirmationRequired):
-		if action == "target_saved" || action == "target_tested" {
-			return "SSH 主机身份尚未确认，配置未保存。请在指纹确认界面核对指纹后再确认。"
-		}
-		return "本地确认尚未完成，操作未保存。请核对显示内容后完成确认。"
-	case errors.Is(err, ipc.ErrCandidateConnectionFailed):
-		return "候选连接验证失败，配置未保存。请检查 IP、端口、网络连通性和目标服务状态后重试。"
-	case errors.Is(err, ipc.ErrCandidateAuthenticationFailed):
-		return "候选身份验证失败，配置未保存。请核对账号、密码及该账号的连接权限后重试。"
-	case errors.Is(err, ipc.ErrCandidateTLSFailed):
-		return "候选 TLS 验证失败，配置未保存。请核对传输策略、CA 证书文件和服务端证书后重试。"
-	case errors.Is(err, ipc.ErrInvalidRequest):
-		switch action {
-		case "target_tested", "target_saved":
-			return "SSH 目标保存失败：请检查 IP、端口、登录账号、密码和命令黑名单正则格式。"
-		case "database_tested", "database_saved":
-			return "数据库目标保存失败：请检查 IP、端口、引擎、只读账号密码，以及可写账号和密码是否同时填写。"
-		default:
-			return "操作输入无效，请检查当前字段后重试。"
-		}
-	case errors.Is(err, ipc.ErrMethodNotFound):
-		return "本地控制服务版本不匹配，请重启 ssh-mcp 后重试。"
-	case errors.Is(err, context.DeadlineExceeded):
-		return "操作超时，未完成保存或验证。请检查目标连接状态后重试。"
-	}
-
-	switch action {
-	case "target_tested":
-		return "SSH 目标验证未完成，配置未保存。请检查输入、网络、端口、账号密码和主机指纹后重试。"
-	case "database_tested":
-		return "数据库目标验证未完成，配置未保存。请检查输入、网络、账号密码、传输策略、CA 证书和可写账号配置后重试。"
-	case "target_saved":
-		return "SSH 目标未保存：候选验证或本地配置写入未完成。请重新执行验证；若仍失败，请检查本机状态库和连接状态。"
-	case "database_saved":
-		return "数据库目标未保存：候选验证或本地配置写入未完成。请重新执行验证；若仍失败，请检查本机状态库和连接状态。"
-	default:
-		return "操作未完成，且本地服务未提供可安全展示的具体原因。请检查解锁状态、输入和连接状态后重试。"
-	}
+	return localControlErrorNoticeZH(action, err)
 }
 
 func (m *Model) View() tea.View {
@@ -572,7 +560,7 @@ func (m *Model) View() tea.View {
 	}
 	switch m.screen {
 	case screenUnlock:
-		lines = append(lines, "输入主密码", m.input.View(), "", "Enter 解锁  Esc 返回  Shift+Ins 粘贴")
+		lines = append(lines, m.msg.UnlockTitle, m.input.View(), "", m.msg.UnlockHelp)
 	case screenTargets:
 		lines = append(lines, m.renderTargets()...)
 	case screenForm:
@@ -717,19 +705,19 @@ func compactLines(lines []string, width int) []string {
 }
 
 func (m *Model) header() string {
-	state := "已锁定"
+	state := m.msg.LockedState
 	if m.status.Unlocked {
-		state = "已解锁"
+		state = m.msg.UnlockedState
 	}
-	return "ssh-mcp 本地控制台  [" + state + "]"
+	return m.msg.ConsoleTitle + "  [" + state + "]"
 }
 
 func (m *Model) renderDashboard() []string {
 	if m.isCompactLayout() {
-		return []string{"u 解锁  t 目标  q 退出"}
+		return []string{m.msg.DashboardCompactHelp}
 	}
 	return []string{
-		"u 解锁    t 目标    b 备份    o 恢复    k 轮换密钥    p 修改主密码    l 锁定    q 退出",
+		m.msg.DashboardFullHelp,
 	}
 }
 
@@ -737,60 +725,60 @@ func (m *Model) renderTargets() []string {
 	if m.isCompactLayout() {
 		return m.renderCompactTargets()
 	}
-	lines := []string{"目标", ""}
+	lines := []string{m.msg.TargetsTitle, ""}
 	index := 0
 	for _, target := range m.targets.SSH {
-		lines = append(lines, m.targetMarker(index)+fmt.Sprintf("SSH  %s  %s  %s", target.IP, target.Mode, enabledText(target.Enabled)))
+		lines = append(lines, m.targetMarker(index)+fmt.Sprintf("%s  %s  %s  %s", m.msg.TargetKindSSH, target.IP, target.Mode, m.enabledText(target.Enabled)))
 		index++
 	}
 	for _, instance := range m.targets.Databases {
-		lines = append(lines, m.targetMarker(index)+fmt.Sprintf("数据库  %s:%d  %s  %s  %s  %s  %s", instance.Host, instance.Port, instance.Engine, databaseAccountText(instance), databaseTransportPolicyText(instance.TransportPolicy), databaseSecurityText(instance.TransportSecurity), enabledText(instance.Enabled)))
+		lines = append(lines, m.targetMarker(index)+fmt.Sprintf("%s  %s:%d  %s  %s  %s  %s  %s", m.msg.TargetKindDB, instance.Host, instance.Port, instance.Engine, m.databaseAccountText(instance), m.databaseTransportPolicyText(instance.TransportPolicy), m.databaseSecurityText(instance.TransportSecurity), m.enabledText(instance.Enabled)))
 		index++
 	}
 	if index == 0 {
-		lines = append(lines, "暂无目标")
+		lines = append(lines, m.msg.NoTargets)
 	}
-	lines = append(lines, "", "n 新增 SSH    d 新增数据库    Enter 编辑    x 启用/停用    Delete 删除    r 刷新    Esc 返回")
+	lines = append(lines, "", m.msg.TargetsHelpFull)
 	return lines
 }
 
 func (m *Model) renderCompactTargets() []string {
-	lines := []string{"目标"}
+	lines := []string{m.msg.TargetsTitle}
 	index := 0
 	width := max(1, m.contentWidth()-4)
 	for _, target := range m.targets.SSH {
-		lines = append(lines, m.targetMarker(index)+compactText("SSH "+target.IP, width))
+		lines = append(lines, m.targetMarker(index)+compactText(m.msg.TargetKindSSH+" "+target.IP, width))
 		index++
 	}
 	for _, instance := range m.targets.Databases {
-		lines = append(lines, m.targetMarker(index)+compactText(fmt.Sprintf("DB %s:%d", instance.Host, instance.Port), width))
+		lines = append(lines, m.targetMarker(index)+compactText(fmt.Sprintf("%s %s:%d", m.msg.TargetKindDB, instance.Host, instance.Port), width))
 		index++
 	}
 	if index == 0 {
-		lines = append(lines, "暂无目标")
+		lines = append(lines, m.msg.NoTargets)
 	}
-	return append(lines, "", "n 新增  Enter 编辑", "x 启停  Esc 返回")
+	return append(lines, "", m.msg.TargetsCompactHelp1, m.msg.TargetsCompactHelp2)
 }
 
 func (m *Model) renderForm() []string {
 	if m.form == nil {
-		return []string{"表单不可用"}
+		return []string{m.msg.FormUnavailable}
 	}
-	title := "SSH 目标"
+	title := m.msg.SSHTargetTitle
 	if m.form.kind == formDatabase {
-		title = "数据库实例"
+		title = m.msg.DBTargetTitle
 	}
 	lines := []string{title, ""}
 	if m.isCompactLayout() {
 		field := m.form.fields[m.form.index]
 		lines = append(lines, fmt.Sprintf("%d/%d  %s", m.form.index+1, len(m.form.fields), compactText(field.label, max(1, m.contentWidth()-6))))
 		lines = append(lines, inputLinePrefix+m.input.View())
-		return append(lines, "", "Tab 字段  Ctrl+S 保存", "Esc 取消  Shift+Ins 粘贴")
+		return append(lines, "", m.msg.FormHelpCompact1, m.msg.FormHelpCompact2)
 	}
 	for index, field := range m.form.fields {
 		value := field.value
 		if field.secret && value != "" {
-			value = "已设置"
+			value = m.msg.SecretMasked
 		}
 		if index == m.form.index {
 			lines = append(lines, inputLinePrefix+m.input.View())
@@ -798,67 +786,67 @@ func (m *Model) renderForm() []string {
 				lines = append(lines, "  "+field.hint)
 			}
 		} else {
-			lines = append(lines, "  "+field.label+"："+value)
+			lines = append(lines, "  "+field.label+m.msg.FieldSeparator+value)
 		}
 	}
-	lines = append(lines, "", "Tab/Enter 切换字段    Ctrl+S 保存    Esc 取消    Shift+Ins 粘贴")
+	lines = append(lines, "", m.msg.FormHelpFull)
 	return lines
 }
 
 func (m *Model) renderFingerprintConfirmation() []string {
 	if m.pending == nil {
-		return []string{"SSH 主机指纹确认不可用"}
+		return []string{m.msg.FingerprintConfirmUnavailable}
 	}
 	return []string{
-		"SSH 主机指纹确认",
+		m.msg.FingerprintConfirmTitle,
 		"",
 		m.pending.fingerprint,
 		"",
-		"y 确认并测试    n 拒绝并返回编辑    Esc 返回编辑",
+		m.msg.FingerprintConfirmHelp,
 	}
 }
 
 func (m *Model) renderTargetDeleteConfirmation() []string {
 	if m.deleting == nil {
-		return []string{"删除目标不可用"}
+		return []string{m.msg.DeleteConfirmUnavailable}
 	}
 	return []string{
-		"删除目标",
+		m.msg.DeleteConfirmTitle,
 		"",
 		m.deleting.label,
 		"",
-		"删除会撤销未执行的授权，并清理未引用的凭据。",
+		m.msg.DeleteConfirmWarning,
 		"",
-		"y 删除    n 取消    Esc 取消",
+		m.msg.DeleteConfirmHelp,
 	}
 }
 
 func (m *Model) renderMaintenance() []string {
 	if m.maintenance == nil {
-		return []string{"维护表单不可用"}
+		return []string{m.msg.MaintenanceUnavailable}
 	}
-	title := "创建加密备份"
+	title := m.msg.MaintenanceBackupTitle
 	switch m.maintenance.action {
 	case maintenanceRestore:
-		title = "恢复备份到独立本地文件"
+		title = m.msg.MaintenanceRestoreTitle
 	case maintenanceRotate:
-		title = "显式轮换数据密钥"
+		title = m.msg.MaintenanceRotateTitle
 	case maintenanceChangeMasterPassword:
-		title = "修改主密码"
+		title = m.msg.MaintenanceChangePasswordTitle
 	}
 	lines := []string{title, ""}
 	for index, field := range m.maintenance.fields {
 		value := field.value
 		if field.secret && value != "" {
-			value = "已设置"
+			value = m.msg.SecretMasked
 		}
 		if index == m.maintenance.index {
 			lines = append(lines, "> "+m.input.View())
 		} else {
-			lines = append(lines, "  "+field.label+"："+value)
+			lines = append(lines, "  "+field.label+m.msg.FieldSeparator+value)
 		}
 	}
-	lines = append(lines, "", "Tab/Enter 切换字段    Ctrl+S 确认    Esc 取消    Shift+Ins 粘贴")
+	lines = append(lines, "", m.msg.MaintenanceHelpFull)
 	return lines
 }
 
@@ -866,7 +854,7 @@ func (m *Model) beginUnlock() {
 	m.screen = screenUnlock
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Prompt = "主密码："
+	m.input.Prompt = m.msg.UnlockPrompt
 	m.input.EchoMode = textinput.EchoPassword
 	m.input.EchoCharacter = '*'
 	m.input.SetWidth(textInputWidth(m.width, m.input.Prompt, ""))
@@ -879,14 +867,14 @@ func (m *Model) beginSSHForm(target store.SSHTarget) {
 		port = 22
 	}
 	fields := []formField{
-		{label: "IP", value: target.IP},
-		{label: "SSH 端口", value: strconv.Itoa(port)},
-		{label: "登录账号", value: target.LoginUsername},
-		{label: "密码（留空不修改）", secret: true},
-		{label: "命令黑名单（正则，逗号分隔）", value: strings.Join(target.CommandBlacklistPatterns, ","), hint: "多个正则用英文逗号分隔；任一正则匹配命令文本即拦截。例：rm /data/.*, cat /etc/passwd, passwd.*"},
-		{label: "说明", value: target.Description},
-		{label: "环境", value: target.Environment},
-		{label: "允许文件读写（true/false）", value: strconv.FormatBool(target.AllowFileOperations), hint: "开启后允许 read_ssh_file 和 deploy_ssh_binary；新建目标默认 true。"},
+		{label: m.msg.SSHFieldIP, value: target.IP},
+		{label: m.msg.SSHFieldPort, value: strconv.Itoa(port)},
+		{label: m.msg.SSHFieldUsername, value: target.LoginUsername},
+		{label: m.msg.SSHFieldPassword, secret: true},
+		{label: m.msg.SSHFieldBlacklist, value: strings.Join(target.CommandBlacklistPatterns, ","), hint: m.msg.SSHFieldBlacklistHint},
+		{label: m.msg.SSHFieldDescription, value: target.Description},
+		{label: m.msg.SSHFieldEnvironment, value: target.Environment},
+		{label: m.msg.SSHFieldAllowFile, value: strconv.FormatBool(target.AllowFileOperations), hint: m.msg.SSHFieldAllowFileHint},
 	}
 	m.form = &targetForm{kind: formSSH, enabled: target.Enabled, ssh: &target, fields: fields}
 	m.screen = screenForm
@@ -902,18 +890,18 @@ func (m *Model) beginDatabaseForm(instance store.DatabaseInstance) {
 		instance.TransportPolicy = store.DatabaseLegacyPlaintext
 	}
 	m.form = &targetForm{kind: formDatabase, enabled: instance.Enabled, database: &instance, fields: []formField{
-		{label: "IP", value: instance.Host},
-		{label: "端口", value: strconv.Itoa(port)},
-		{label: "引擎（mysql/postgresql）", value: string(instance.Engine)},
-		{label: "默认数据库", value: instance.DefaultDatabase},
-		{label: "只读账号", value: instance.ReadUsername},
-		{label: "只读密码（留空不修改）", secret: true},
-		{label: "可写账号（可选；填写后用于变更 SQL，可与只读账号相同）", value: instance.WriteUsername},
-		{label: "可写密码（同账号可留空复用只读密码；不同账号必填）", secret: true},
-		{label: "传输策略（tls_verified/legacy_plaintext）", value: string(instance.TransportPolicy)},
-		{label: "CA 证书文件（tls_verified 必填）", value: instance.TLSCAPath},
-		{label: "说明", value: instance.Description},
-		{label: "环境", value: instance.Environment},
+		{label: m.msg.DBFieldHost, value: instance.Host},
+		{label: m.msg.DBFieldPort, value: strconv.Itoa(port)},
+		{label: m.msg.DBFieldEngine, value: string(instance.Engine)},
+		{label: m.msg.DBFieldDefaultDB, value: instance.DefaultDatabase},
+		{label: m.msg.DBFieldReadUsername, value: instance.ReadUsername},
+		{label: m.msg.DBFieldReadPassword, secret: true},
+		{label: m.msg.DBFieldWriteUsername, value: instance.WriteUsername},
+		{label: m.msg.DBFieldWritePassword, secret: true},
+		{label: m.msg.DBFieldPolicy, value: string(instance.TransportPolicy)},
+		{label: m.msg.DBFieldTLSCAPath, value: instance.TLSCAPath},
+		{label: m.msg.DBFieldDescription, value: instance.Description},
+		{label: m.msg.DBFieldEnvironment, value: instance.Environment},
 	}}
 	m.screen = screenForm
 	m.loadCurrentField()
@@ -945,13 +933,13 @@ func (m *Model) toggleSelectedTarget() tea.Cmd {
 
 func (m *Model) beginTargetDelete() {
 	if !m.status.Unlocked {
-		m.notice = "请先解锁本地凭据库后再删除目标。"
+		m.notice = m.msg.DeleteRequireUnlock
 		return
 	}
 	if m.selected < len(m.targets.SSH) {
 		target := m.targets.SSH[m.selected]
 		m.deleting = &pendingTargetDelete{
-			label:  "SSH  " + target.IP,
+			label:  m.msg.TargetKindSSH + "  " + target.IP,
 			method: "target.delete_ssh",
 			params: control.DeleteSSHTargetParams{IP: target.IP},
 		}
@@ -962,7 +950,7 @@ func (m *Model) beginTargetDelete() {
 	if index >= 0 && index < len(m.targets.Databases) {
 		instance := m.targets.Databases[index]
 		m.deleting = &pendingTargetDelete{
-			label:  fmt.Sprintf("数据库  %s:%d", instance.Host, instance.Port),
+			label:  fmt.Sprintf("%s  %s:%d", m.msg.TargetKindDB, instance.Host, instance.Port),
 			method: "target.delete_database",
 			params: control.DeleteDatabaseInstanceParams{Host: instance.Host, Port: instance.Port},
 		}
@@ -975,14 +963,14 @@ func (m *Model) submitForm() tea.Cmd {
 		return nil
 	}
 	if !m.status.Unlocked {
-		m.notice = "本地凭据库已锁定，请先解锁后再保存。"
+		m.notice = m.msg.SaveRequireUnlock
 		return nil
 	}
 	value := func(index int) string { return m.form.fields[index].value }
 	if m.form.kind == formSSH {
 		port, err := strconv.Atoi(value(1))
 		if err != nil {
-			m.notice = "SSH 端口必须是整数。"
+			m.notice = m.msg.FormSSHPortInvalid
 			return nil
 		}
 		credentialID := m.form.ssh.CredentialID
@@ -991,7 +979,7 @@ func (m *Model) submitForm() tea.Cmd {
 		}
 		allowFileOperations, parseErr := strconv.ParseBool(strings.TrimSpace(value(7)))
 		if parseErr != nil {
-			m.notice = "允许文件读写必须填写 true 或 false。"
+			m.notice = m.msg.FormSSHAllowFileInvalid
 			return nil
 		}
 		params := control.UpsertSSHTargetParams{Target: store.SSHTarget{
@@ -1005,7 +993,7 @@ func (m *Model) submitForm() tea.Cmd {
 
 	port, err := strconv.Atoi(value(1))
 	if err != nil {
-		m.notice = "数据库端口必须是整数。"
+		m.notice = m.msg.FormDBPortInvalid
 		return nil
 	}
 	readCredentialID, writeCredentialID := m.form.database.ReadCredentialID, m.form.database.WriteCredentialID
@@ -1022,11 +1010,11 @@ func (m *Model) submitForm() tea.Cmd {
 		writeCredentialID = fmt.Sprintf("database:%s:%d:write", value(0), port)
 	}
 	if strings.TrimSpace(value(4)) == "" || readCredentialID == "" {
-		m.notice = "必须填写只读账号和密码。"
+		m.notice = m.msg.FormDBMissingRead
 		return nil
 	}
 	if (writeUsername == "" && value(7) != "") || (writeUsername != "" && writeCredentialID == "" && !reuseReadCredential) {
-		m.notice = "不同于只读账号的可写账号必须同时填写密码。"
+		m.notice = m.msg.FormDBMissingWrite
 		return nil
 	}
 	params := control.UpsertDatabaseInstanceParams{Instance: store.DatabaseInstance{
@@ -1066,7 +1054,7 @@ func (m *Model) beginDatabaseTest(params control.UpsertDatabaseInstanceParams) t
 
 func (m *Model) savePendingTarget() tea.Cmd {
 	if m.pending == nil {
-		m.notice = "找不到待保存目标。"
+		m.notice = m.msg.PendingTargetNotFound
 		return nil
 	}
 	return m.call("target_saved", m.pending.saveMethod, m.pending.saveParams, &struct{}{})
@@ -1093,7 +1081,7 @@ func (m *Model) loadCurrentField() {
 	field := m.form.fields[m.form.index]
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Prompt = field.label + "："
+	m.input.Prompt = field.label + m.msg.FieldSeparator
 	m.input.EchoMode = textinput.EchoNormal
 	if field.secret {
 		m.input.EchoMode = textinput.EchoPassword
@@ -1146,13 +1134,13 @@ func (m *Model) beginMaintenance(action maintenanceAction) {
 	form := &maintenanceForm{action: action}
 	switch action {
 	case maintenanceBackup:
-		form.fields = []formField{{label: "备份文件路径"}, {label: "主密码", secret: true}}
+		form.fields = []formField{{label: m.msg.MaintenanceFieldBackupDest}, {label: m.msg.MaintenanceFieldMasterPassword, secret: true}}
 	case maintenanceRestore:
-		form.fields = []formField{{label: "备份文件路径"}, {label: "恢复目标路径"}, {label: "主密码", secret: true}}
+		form.fields = []formField{{label: m.msg.MaintenanceFieldRestoreSrc}, {label: m.msg.MaintenanceFieldRestoreDest}, {label: m.msg.MaintenanceFieldMasterPassword, secret: true}}
 	case maintenanceRotate:
-		form.fields = []formField{{label: "确认文本（输入 ROTATE）"}, {label: "主密码", secret: true}}
+		form.fields = []formField{{label: m.msg.MaintenanceFieldRotateConfirm}, {label: m.msg.MaintenanceFieldMasterPassword, secret: true}}
 	case maintenanceChangeMasterPassword:
-		form.fields = []formField{{label: "当前主密码", secret: true}, {label: "新主密码", secret: true}}
+		form.fields = []formField{{label: m.msg.MaintenanceFieldCurrentPassword, secret: true}, {label: m.msg.MaintenanceFieldNewPassword, secret: true}}
 	}
 	m.maintenance = form
 	m.screen = screenMaintenance
@@ -1196,7 +1184,7 @@ func (m *Model) loadMaintenanceField() {
 	field := m.maintenance.fields[m.maintenance.index]
 	m.input = textinput.New()
 	m.input.SetVirtualCursor(false)
-	m.input.Prompt = field.label + "："
+	m.input.Prompt = field.label + m.msg.FieldSeparator
 	m.input.EchoMode = textinput.EchoNormal
 	if field.secret {
 		m.input.EchoMode = textinput.EchoPassword
@@ -1276,43 +1264,59 @@ func (m *Model) call(action, method string, params any, output any) tea.Cmd {
 	}
 }
 
-func enabledText(enabled bool) string {
+func (m *Model) enabledText(enabled bool) string {
 	if enabled {
-		return "启用"
+		return m.msg.Enabled
 	}
-	return "停用"
+	return m.msg.Disabled
+}
+
+func (m *Model) databaseAccountText(instance store.DatabaseInstance) string {
+	if instance.WriteUsername == "" {
+		return m.msg.DBNoWriteAccount
+	}
+	if instance.WriteCredentialID == "" && instance.WriteUsername == instance.ReadUsername {
+		return m.msg.DBWriteAccountReuse
+	}
+	return m.msg.DBWriteAccountConfigured
+}
+
+func (m *Model) databaseSecurityText(security store.TransportSecurity) string {
+	switch security {
+	case store.TransportTLSVerified:
+		return m.msg.SecurityTLSVerified
+	case store.TransportTLSUnverified:
+		return m.msg.SecurityTLSUnverified
+	case store.TransportPlaintext:
+		return m.msg.SecurityPlaintext
+	default:
+		return m.msg.SecurityUntested
+	}
+}
+
+func (m *Model) databaseTransportPolicyText(policy store.DatabaseTransportPolicy) string {
+	switch policy {
+	case store.DatabaseTLSVerified:
+		return m.msg.PolicyTLSVerified
+	case store.DatabaseLegacyPlaintext:
+		return m.msg.PolicyLegacyPlaintext
+	default:
+		return m.msg.PolicyLegacyPlaintext
+	}
+}
+
+func enabledText(enabled bool) string {
+	return (&Model{msg: messagesZH}).enabledText(enabled)
 }
 
 func databaseAccountText(instance store.DatabaseInstance) string {
-	if instance.WriteUsername == "" {
-		return "未配置写账号"
-	}
-	if instance.WriteCredentialID == "" && instance.WriteUsername == instance.ReadUsername {
-		return "写账号复用只读凭据"
-	}
-	return "写账号已配置"
+	return (&Model{msg: messagesZH}).databaseAccountText(instance)
 }
 
 func databaseSecurityText(security store.TransportSecurity) string {
-	switch security {
-	case store.TransportTLSVerified:
-		return "TLS 已验证"
-	case store.TransportTLSUnverified:
-		return "TLS 未验证"
-	case store.TransportPlaintext:
-		return "明文"
-	default:
-		return "未测试"
-	}
+	return (&Model{msg: messagesZH}).databaseSecurityText(security)
 }
 
 func databaseTransportPolicyText(policy store.DatabaseTransportPolicy) string {
-	switch policy {
-	case store.DatabaseTLSVerified:
-		return "要求 TLS"
-	case store.DatabaseLegacyPlaintext:
-		return "旧式明文"
-	default:
-		return "旧式明文"
-	}
+	return (&Model{msg: messagesZH}).databaseTransportPolicyText(policy)
 }

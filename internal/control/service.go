@@ -339,8 +339,13 @@ func (s *Service) prepareDatabaseInstanceConfiguration(ctx context.Context, inst
 }
 
 type Status struct {
-	Initialized bool `json:"initialized"`
-	Unlocked    bool `json:"unlocked"`
+	Initialized bool   `json:"initialized"`
+	Unlocked    bool   `json:"unlocked"`
+	Language    string `json:"language"`
+}
+
+type SetTUILanguageParams struct {
+	Language string `json:"language"`
 }
 
 type UnlockParams struct {
@@ -471,6 +476,8 @@ func (s *Service) Handle(ctx context.Context, method string, params json.RawMess
 		return s.rotateDataKey(ctx, params)
 	case "keys.change_master_password":
 		return s.changeMasterPassword(ctx, params)
+	case "tui.set_language":
+		return s.setTUILanguage(ctx, params)
 	default:
 		return nil, ipc.ErrMethodNotFound
 	}
@@ -504,11 +511,36 @@ func classifyLocalControlError(err error) error {
 }
 
 func (s *Service) status(ctx context.Context) (Status, error) {
+	if s.store == nil {
+		return Status{Unlocked: s.sessions.IsUnlocked()}, nil
+	}
 	initialized, err := s.store.IsInitialized(ctx)
 	if err != nil {
 		return Status{}, err
 	}
-	return Status{Initialized: initialized, Unlocked: s.sessions.IsUnlocked()}, nil
+	var language string
+	if lang, err := s.store.GetTUILanguage(ctx); err == nil {
+		language = lang
+	}
+	return Status{Initialized: initialized, Unlocked: s.sessions.IsUnlocked(), Language: language}, nil
+}
+
+func (s *Service) setTUILanguage(ctx context.Context, params json.RawMessage) (struct{}, error) {
+	input, err := decodeParams[SetTUILanguageParams](params)
+	if err != nil {
+		return struct{}{}, ipc.ErrInvalidRequest
+	}
+	lang := strings.TrimSpace(input.Language)
+	if lang != "zh" && lang != "en" {
+		return struct{}{}, ipc.ErrInvalidRequest
+	}
+	if s.store == nil {
+		return struct{}{}, errors.New("store unavailable")
+	}
+	if err := s.store.SetTUILanguage(ctx, lang); err != nil {
+		return struct{}{}, err
+	}
+	return struct{}{}, nil
 }
 
 func (s *Service) unlock(ctx context.Context, params json.RawMessage) (UnlockResult, error) {
