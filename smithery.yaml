@@ -1,0 +1,18 @@
+# Smithery configuration for ssh-mcp
+# See https://smithery.ai/docs/config#smitheryyaml for details
+
+startCommand:
+  type: stdio
+  commandFunction: |-
+    (config) => ({
+      command: config.binPath || './bin/ssh-mcp',
+      args: ['serve']
+    })
+
+configSchema:
+  type: object
+  properties:
+    binPath:
+      type: string
+      description: "Absolute path to the compiled ssh-mcp executable binary"
+      default: "./bin/ssh-mcp"
