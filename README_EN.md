@@ -63,12 +63,15 @@ Giving an LLM unconstrained terminal access (`bash` or raw `ssh`) is dangerous: 
 
 ```mermaid
 flowchart LR
-    C["MCP Agent / Client<br/>(Claude, Cursor, Codex, etc.)"] -->|MCP / stdio| B["ssh-mcp serve<br/>(stdio bridge)"]
+    C["MCP Agent / Client<br/>(Claude, Cursor, Codex)"] -->|MCP / stdio| B["ssh-mcp serve<br/>(stdio bridge)"]
     B -->|Local IPC| D["Local Daemon"]
     U["Local TUI Console<br/>(ssh-mcp manage)"] -->|Local IPC| D
-    D --> S[("Local Encrypted Vault<br/>& Target Registry")]
+    D --> S["Local Encrypted Vault<br/>& Target Registry"]
     D -->|SSH / SFTP| R1["Linux SSH Hosts"]
-    D -->|SQL (TLS / Plaintext)| R2["MySQL / PostgreSQL"]
+    D -->|MySQL / PostgreSQL| R2["Databases (TLS / Plaintext)"]
+    R1 --> D
+    R2 --> D
+    D --> B --> C
 ```
 
 - **`serve`**: The stdio MCP bridge invoked by your AI client. It automatically spawns or connects to the local daemon via OS-level IPC (Unix socket or named pipe).
