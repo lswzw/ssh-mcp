@@ -2208,4 +2208,3 @@ func TestServiceReportsAndUpdatesTUILanguage(t *testing.T) {
 		t.Fatalf("set language with invalid value error = %v, want ipc.ErrInvalidRequest", err)
 	}
 }
-

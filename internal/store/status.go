@@ -44,4 +44,3 @@ func (s *Store) SetTUILanguage(ctx context.Context, lang string) error {
 	}
 	return nil
 }
-
