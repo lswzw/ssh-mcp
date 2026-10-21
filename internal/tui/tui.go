@@ -721,43 +721,102 @@ func (m *Model) renderDashboard() []string {
 	}
 }
 
+// renderTargets pins the key hints at the top of the screen so they stay
+// visible no matter how long the target list is, and windows the list so the
+// selected row is always on screen.
 func (m *Model) renderTargets() []string {
-	if m.isCompactLayout() {
-		return m.renderCompactTargets()
-	}
-	lines := []string{m.msg.TargetsTitle, ""}
-	index := 0
-	for _, target := range m.targets.SSH {
-		lines = append(lines, m.targetMarker(index)+fmt.Sprintf("%s  %s  %s  %s", m.msg.TargetKindSSH, target.IP, target.Mode, m.enabledText(target.Enabled)))
-		index++
-	}
-	for _, instance := range m.targets.Databases {
-		lines = append(lines, m.targetMarker(index)+fmt.Sprintf("%s  %s:%d  %s  %s  %s  %s  %s", m.msg.TargetKindDB, instance.Host, instance.Port, instance.Engine, m.databaseAccountText(instance), m.databaseTransportPolicyText(instance.TransportPolicy), m.databaseSecurityText(instance.TransportSecurity), m.enabledText(instance.Enabled)))
-		index++
-	}
-	if index == 0 {
-		lines = append(lines, m.msg.NoTargets)
-	}
-	lines = append(lines, "", m.msg.TargetsHelpFull)
-	return lines
+	return m.renderTargetScreen(m.isCompactLayout())
 }
 
-func (m *Model) renderCompactTargets() []string {
-	lines := []string{m.msg.TargetsTitle}
+func (m *Model) renderTargetScreen(compact bool) []string {
+	rows := m.targetRows(compact)
+	// Header rows rendered above the list: hints, spacer (full layout only)
+	// and the title. They are never scrolled away.
+	fixedRows := 3
+	start, visible := m.visibleTargetRows(rows, fixedRows)
+	title := m.msg.TargetsTitle
+	if len(visible) < len(rows) {
+		title += "  " + fmt.Sprintf(m.msg.TargetsRange, start+1, start+len(visible), len(rows))
+	}
+	lines := make([]string, 0, fixedRows+len(rows)+1)
+	if compact {
+		lines = append(lines, m.msg.TargetsCompactHelp1, m.msg.TargetsCompactHelp2, title)
+	} else {
+		lines = append(lines, m.msg.TargetsHelpFull, "", title)
+	}
+	if len(rows) == 0 {
+		return append(lines, m.msg.NoTargets)
+	}
+	return append(lines, visible...)
+}
+
+func (m *Model) targetRows(compact bool) []string {
+	rows := make([]string, 0, m.targetCount())
 	index := 0
 	width := max(1, m.contentWidth()-4)
 	for _, target := range m.targets.SSH {
-		lines = append(lines, m.targetMarker(index)+compactText(m.msg.TargetKindSSH+" "+target.IP, width))
+		if compact {
+			rows = append(rows, m.targetMarker(index)+compactText(m.msg.TargetKindSSH+" "+target.IP, width))
+		} else {
+			rows = append(rows, m.targetMarker(index)+fmt.Sprintf("%s  %s  %s  %s", m.msg.TargetKindSSH, target.IP, target.Mode, m.enabledText(target.Enabled)))
+		}
 		index++
 	}
 	for _, instance := range m.targets.Databases {
-		lines = append(lines, m.targetMarker(index)+compactText(fmt.Sprintf("%s %s:%d", m.msg.TargetKindDB, instance.Host, instance.Port), width))
+		if compact {
+			rows = append(rows, m.targetMarker(index)+compactText(fmt.Sprintf("%s %s:%d", m.msg.TargetKindDB, instance.Host, instance.Port), width))
+		} else {
+			rows = append(rows, m.targetMarker(index)+fmt.Sprintf("%s  %s:%d  %s  %s  %s  %s  %s", m.msg.TargetKindDB, instance.Host, instance.Port, instance.Engine, m.databaseAccountText(instance), m.databaseTransportPolicyText(instance.TransportPolicy), m.databaseSecurityText(instance.TransportSecurity), m.enabledText(instance.Enabled)))
+		}
 		index++
 	}
-	if index == 0 {
-		lines = append(lines, m.msg.NoTargets)
+	return rows
+}
+
+// visibleTargetRows returns the slice of rows that fits the terminal window
+// together with the index of its first row. The window follows the selection
+// so the highlighted row is always rendered.
+func (m *Model) visibleTargetRows(rows []string, fixedRows int) (int, []string) {
+	capacity := m.targetRowsCapacity(fixedRows)
+	if capacity <= 0 || len(rows) <= capacity {
+		return 0, rows
 	}
-	return append(lines, "", m.msg.TargetsCompactHelp1, m.msg.TargetsCompactHelp2)
+	start := m.targetScrollOffset(len(rows), capacity)
+	return start, rows[start : start+capacity]
+}
+
+// targetRowsCapacity returns how many target rows fit below the fixed header
+// rows. Zero means the terminal height is unknown, in which case the whole
+// list is rendered.
+func (m *Model) targetRowsCapacity(fixedRows int) int {
+	if m.height <= 0 {
+		return 0
+	}
+	return max(1, m.height-m.chromeRows()-fixedRows)
+}
+
+// chromeRows counts the rows View renders above every screen body: the header
+// line, its spacer, and the optional notice block.
+func (m *Model) chromeRows() int {
+	rows := 2
+	if m.notice != "" {
+		rows += 2
+	}
+	return rows
+}
+
+func (m *Model) targetScrollOffset(total, capacity int) int {
+	if capacity <= 0 || total <= capacity {
+		return 0
+	}
+	offset := 0
+	if m.selected >= offset+capacity {
+		offset = m.selected - capacity + 1
+	}
+	if m.selected < offset {
+		offset = m.selected
+	}
+	return min(max(offset, 0), total-capacity)
 }
 
 func (m *Model) renderForm() []string {

@@ -19,39 +19,40 @@ type Messages struct {
 	DashboardCompactHelp string
 
 	// Unlock screen
-	UnlockTitle string
+	UnlockTitle  string
 	UnlockPrompt string
-	UnlockHelp  string
+	UnlockHelp   string
 
 	// Targets screen
-	TargetsTitle            string
-	NoTargets               string
-	TargetsHelpFull         string
-	TargetsCompactHelp1     string
-	TargetsCompactHelp2     string
-	TargetKindSSH           string
-	TargetKindDB            string
-	Enabled                 string
-	Disabled                string
-	DBNoWriteAccount        string
-	DBWriteAccountReuse     string
+	TargetsTitle             string
+	NoTargets                string
+	TargetsRange             string
+	TargetsHelpFull          string
+	TargetsCompactHelp1      string
+	TargetsCompactHelp2      string
+	TargetKindSSH            string
+	TargetKindDB             string
+	Enabled                  string
+	Disabled                 string
+	DBNoWriteAccount         string
+	DBWriteAccountReuse      string
 	DBWriteAccountConfigured string
-	SecurityTLSVerified     string
-	SecurityTLSUnverified   string
-	SecurityPlaintext       string
-	SecurityUntested        string
-	PolicyTLSVerified       string
-	PolicyLegacyPlaintext   string
+	SecurityTLSVerified      string
+	SecurityTLSUnverified    string
+	SecurityPlaintext        string
+	SecurityUntested         string
+	PolicyTLSVerified        string
+	PolicyLegacyPlaintext    string
 
 	// Forms general
-	FormUnavailable     string
-	SSHTargetTitle      string
-	DBTargetTitle       string
-	SecretMasked        string
-	FieldSeparator      string
-	FormHelpFull        string
-	FormHelpCompact1    string
-	FormHelpCompact2    string
+	FormUnavailable  string
+	SSHTargetTitle   string
+	DBTargetTitle    string
+	SecretMasked     string
+	FieldSeparator   string
+	FormHelpFull     string
+	FormHelpCompact1 string
+	FormHelpCompact2 string
 
 	// SSH Form fields
 	SSHFieldIP            string
@@ -107,28 +108,28 @@ type Messages struct {
 	DeleteCancelledNotice         string
 
 	// Notices
-	PasteHint                 string
-	PasteEmpty                string
-	PasteWhitespace           string
-	PasteTooLong              string
-	PasteSecret               string
-	PastedRunesCount          func(int) string
-	UnlockCreatedNotice       string
-	UnlockSuccessNotice       string
-	LockedNotice              string
-	MaintenanceDoneNotice     string
-	LanguageSwitchedZHNotice  string
-	LanguageSwitchedENNotice  string
-	FormSSHPortInvalid        string
-	FormSSHAllowFileInvalid   string
-	FormDBPortInvalid         string
-	FormDBMissingRead         string
-	FormDBMissingWrite        string
-	DeleteRequireUnlock       string
-	SaveRequireUnlock         string
-	PendingTargetNotFound     string
-	SSHTestRequestInvalid     string
-	DBTestRequestInvalid      string
+	PasteHint                string
+	PasteEmpty               string
+	PasteWhitespace          string
+	PasteTooLong             string
+	PasteSecret              string
+	PastedRunesCount         func(int) string
+	UnlockCreatedNotice      string
+	UnlockSuccessNotice      string
+	LockedNotice             string
+	MaintenanceDoneNotice    string
+	LanguageSwitchedZHNotice string
+	LanguageSwitchedENNotice string
+	FormSSHPortInvalid       string
+	FormSSHAllowFileInvalid  string
+	FormDBPortInvalid        string
+	FormDBMissingRead        string
+	FormDBMissingWrite       string
+	DeleteRequireUnlock      string
+	SaveRequireUnlock        string
+	PendingTargetNotFound    string
+	SSHTestRequestInvalid    string
+	DBTestRequestInvalid     string
 
 	// Local control error notice function
 	LocalControlErrorNotice func(action string, err error) string
@@ -146,24 +147,25 @@ var messagesZH = &Messages{
 	UnlockPrompt: "主密码：",
 	UnlockHelp:   "Enter 解锁  Esc 返回  Shift+Ins 粘贴",
 
-	TargetsTitle:            "目标",
-	NoTargets:               "暂无目标",
-	TargetsHelpFull:         "n 新增 SSH    d 新增数据库    Enter 编辑    x 启用/停用    Delete 删除    r 刷新    Esc 返回",
-	TargetsCompactHelp1:     "n 新增  Enter 编辑",
-	TargetsCompactHelp2:     "x 启停  Esc 返回",
-	TargetKindSSH:           "SSH",
-	TargetKindDB:            "数据库",
-	Enabled:                 "启用",
-	Disabled:                "停用",
-	DBNoWriteAccount:        "未配置写账号",
-	DBWriteAccountReuse:     "写账号复用只读凭据",
+	TargetsTitle:             "目标",
+	NoTargets:                "暂无目标",
+	TargetsRange:             "第 %d-%d 条 / 共 %d 条",
+	TargetsHelpFull:          "n 新增 SSH    d 新增数据库    Enter 编辑    x 启用/停用    Delete 删除    r 刷新    Esc 返回",
+	TargetsCompactHelp1:      "n 新增  Enter 编辑",
+	TargetsCompactHelp2:      "x 启停  Esc 返回",
+	TargetKindSSH:            "SSH",
+	TargetKindDB:             "数据库",
+	Enabled:                  "启用",
+	Disabled:                 "停用",
+	DBNoWriteAccount:         "未配置写账号",
+	DBWriteAccountReuse:      "写账号复用只读凭据",
 	DBWriteAccountConfigured: "写账号已配置",
-	SecurityTLSVerified:     "TLS 已验证",
-	SecurityTLSUnverified:   "TLS 未验证",
-	SecurityPlaintext:       "明文",
-	SecurityUntested:        "未测试",
-	PolicyTLSVerified:       "要求 TLS",
-	PolicyLegacyPlaintext:   "旧式明文",
+	SecurityTLSVerified:      "TLS 已验证",
+	SecurityTLSUnverified:    "TLS 未验证",
+	SecurityPlaintext:        "明文",
+	SecurityUntested:         "未测试",
+	PolicyTLSVerified:        "要求 TLS",
+	PolicyLegacyPlaintext:    "旧式明文",
 
 	FormUnavailable:  "表单不可用",
 	SSHTargetTitle:   "SSH 目标",
@@ -223,28 +225,28 @@ var messagesZH = &Messages{
 	DeleteConfirmHelp:             "y 删除    n 取消    Esc 取消",
 	DeleteCancelledNotice:         "已取消删除目标。",
 
-	PasteHint:                 "请使用终端粘贴：Shift+Ins 或 Cmd+V。",
-	PasteEmpty:                "粘贴内容为空。",
-	PasteWhitespace:           "粘贴内容包含空白字符，已忽略。",
-	PasteTooLong:              "粘贴内容超过长度上限，已忽略。",
-	PasteSecret:               "已粘贴。",
-	PastedRunesCount:          func(n int) string { return fmt.Sprintf("已粘贴 %d 个字符。", n) },
-	UnlockCreatedNotice:       "已创建并解锁本地凭据库。",
-	UnlockSuccessNotice:       "已解锁本地凭据库。",
-	LockedNotice:              "本地凭据库已锁定。",
-	MaintenanceDoneNotice:     "维护操作已完成。",
-	LanguageSwitchedZHNotice:  "已切换为中文。",
-	LanguageSwitchedENNotice:  "已切换为英文。",
-	FormSSHPortInvalid:        "SSH 端口必须是整数。",
-	FormSSHAllowFileInvalid:   "允许文件读写必须填写 true 或 false。",
-	FormDBPortInvalid:         "数据库端口必须是整数。",
-	FormDBMissingRead:         "必须填写只读账号和密码。",
-	FormDBMissingWrite:        "不同于只读账号的可写账号必须同时填写密码。",
-	DeleteRequireUnlock:       "请先解锁本地凭据库后再删除目标。",
-	SaveRequireUnlock:         "本地凭据库已锁定，请先解锁后再保存。",
-	PendingTargetNotFound:     "找不到待保存目标。",
-	SSHTestRequestInvalid:     "SSH 测试请求无效。",
-	DBTestRequestInvalid:      "数据库测试请求无效。",
+	PasteHint:                "请使用终端粘贴：Shift+Ins 或 Cmd+V。",
+	PasteEmpty:               "粘贴内容为空。",
+	PasteWhitespace:          "粘贴内容包含空白字符，已忽略。",
+	PasteTooLong:             "粘贴内容超过长度上限，已忽略。",
+	PasteSecret:              "已粘贴。",
+	PastedRunesCount:         func(n int) string { return fmt.Sprintf("已粘贴 %d 个字符。", n) },
+	UnlockCreatedNotice:      "已创建并解锁本地凭据库。",
+	UnlockSuccessNotice:      "已解锁本地凭据库。",
+	LockedNotice:             "本地凭据库已锁定。",
+	MaintenanceDoneNotice:    "维护操作已完成。",
+	LanguageSwitchedZHNotice: "已切换为中文。",
+	LanguageSwitchedENNotice: "已切换为英文。",
+	FormSSHPortInvalid:       "SSH 端口必须是整数。",
+	FormSSHAllowFileInvalid:  "允许文件读写必须填写 true 或 false。",
+	FormDBPortInvalid:        "数据库端口必须是整数。",
+	FormDBMissingRead:        "必须填写只读账号和密码。",
+	FormDBMissingWrite:       "不同于只读账号的可写账号必须同时填写密码。",
+	DeleteRequireUnlock:      "请先解锁本地凭据库后再删除目标。",
+	SaveRequireUnlock:        "本地凭据库已锁定，请先解锁后再保存。",
+	PendingTargetNotFound:    "找不到待保存目标。",
+	SSHTestRequestInvalid:    "SSH 测试请求无效。",
+	DBTestRequestInvalid:     "数据库测试请求无效。",
 
 	LocalControlErrorNotice: localControlErrorNoticeZH,
 }
@@ -261,24 +263,25 @@ var messagesEN = &Messages{
 	UnlockPrompt: "Master Password: ",
 	UnlockHelp:   "Enter Unlock  Esc Back  Shift+Ins Paste",
 
-	TargetsTitle:            "Targets",
-	NoTargets:               "No targets registered",
-	TargetsHelpFull:         "n Add SSH  d Add DB  Enter Edit  x Toggle  Delete Remove  r Refresh  Esc Back",
-	TargetsCompactHelp1:     "n Add  Enter Edit",
-	TargetsCompactHelp2:     "x Toggle  Esc Back",
-	TargetKindSSH:           "SSH",
-	TargetKindDB:            "DB",
-	Enabled:                 "Enabled",
-	Disabled:                "Disabled",
-	DBNoWriteAccount:        "No write user",
-	DBWriteAccountReuse:     "Write user reuses read credential",
+	TargetsTitle:             "Targets",
+	NoTargets:                "No targets registered",
+	TargetsRange:             "%d-%d of %d",
+	TargetsHelpFull:          "n Add SSH  d Add DB  Enter Edit  x Toggle  Delete Remove  r Refresh  Esc Back",
+	TargetsCompactHelp1:      "n Add  Enter Edit",
+	TargetsCompactHelp2:      "x Toggle  Esc Back",
+	TargetKindSSH:            "SSH",
+	TargetKindDB:             "DB",
+	Enabled:                  "Enabled",
+	Disabled:                 "Disabled",
+	DBNoWriteAccount:         "No write user",
+	DBWriteAccountReuse:      "Write user reuses read credential",
 	DBWriteAccountConfigured: "Write user configured",
-	SecurityTLSVerified:     "TLS verified",
-	SecurityTLSUnverified:   "TLS unverified",
-	SecurityPlaintext:       "Plaintext",
-	SecurityUntested:        "Untested",
-	PolicyTLSVerified:       "Require TLS",
-	PolicyLegacyPlaintext:   "Legacy plaintext",
+	SecurityTLSVerified:      "TLS verified",
+	SecurityTLSUnverified:    "TLS unverified",
+	SecurityPlaintext:        "Plaintext",
+	SecurityUntested:         "Untested",
+	PolicyTLSVerified:        "Require TLS",
+	PolicyLegacyPlaintext:    "Legacy plaintext",
 
 	FormUnavailable:  "Form unavailable",
 	SSHTargetTitle:   "SSH Target",
@@ -338,28 +341,28 @@ var messagesEN = &Messages{
 	DeleteConfirmHelp:             "y Delete  n Cancel  Esc Cancel",
 	DeleteCancelledNotice:         "Target deletion cancelled.",
 
-	PasteHint:                 "Use terminal paste: Shift+Ins or Cmd+V.",
-	PasteEmpty:                "Pasted content is empty.",
-	PasteWhitespace:           "Pasted content contains whitespace; ignored.",
-	PasteTooLong:              "Pasted content exceeds maximum length; ignored.",
-	PasteSecret:               "Pasted.",
-	PastedRunesCount:          func(n int) string { return fmt.Sprintf("Pasted %d characters.", n) },
-	UnlockCreatedNotice:       "Local credential vault created and unlocked.",
-	UnlockSuccessNotice:       "Local credential vault unlocked.",
-	LockedNotice:              "Local credential vault is locked.",
-	MaintenanceDoneNotice:     "Maintenance operation completed.",
-	LanguageSwitchedZHNotice:  "已切换为中文。",
-	LanguageSwitchedENNotice:  "Switched to English.",
-	FormSSHPortInvalid:        "SSH port must be an integer.",
-	FormSSHAllowFileInvalid:   "Allow file operations must be true or false.",
-	FormDBPortInvalid:         "Database port must be an integer.",
-	FormDBMissingRead:         "Read username and password are required.",
-	FormDBMissingWrite:        "Write account different from read account requires a password.",
-	DeleteRequireUnlock:       "Please unlock local credential vault before deleting targets.",
-	SaveRequireUnlock:         "Local credential vault is locked; please unlock before saving.",
-	PendingTargetNotFound:     "Pending target not found.",
-	SSHTestRequestInvalid:     "Invalid SSH test request.",
-	DBTestRequestInvalid:      "Invalid database test request.",
+	PasteHint:                "Use terminal paste: Shift+Ins or Cmd+V.",
+	PasteEmpty:               "Pasted content is empty.",
+	PasteWhitespace:          "Pasted content contains whitespace; ignored.",
+	PasteTooLong:             "Pasted content exceeds maximum length; ignored.",
+	PasteSecret:              "Pasted.",
+	PastedRunesCount:         func(n int) string { return fmt.Sprintf("Pasted %d characters.", n) },
+	UnlockCreatedNotice:      "Local credential vault created and unlocked.",
+	UnlockSuccessNotice:      "Local credential vault unlocked.",
+	LockedNotice:             "Local credential vault is locked.",
+	MaintenanceDoneNotice:    "Maintenance operation completed.",
+	LanguageSwitchedZHNotice: "已切换为中文。",
+	LanguageSwitchedENNotice: "Switched to English.",
+	FormSSHPortInvalid:       "SSH port must be an integer.",
+	FormSSHAllowFileInvalid:  "Allow file operations must be true or false.",
+	FormDBPortInvalid:        "Database port must be an integer.",
+	FormDBMissingRead:        "Read username and password are required.",
+	FormDBMissingWrite:       "Write account different from read account requires a password.",
+	DeleteRequireUnlock:      "Please unlock local credential vault before deleting targets.",
+	SaveRequireUnlock:        "Local credential vault is locked; please unlock before saving.",
+	PendingTargetNotFound:    "Pending target not found.",
+	SSHTestRequestInvalid:    "Invalid SSH test request.",
+	DBTestRequestInvalid:     "Invalid database test request.",
 
 	LocalControlErrorNotice: localControlErrorNoticeEN,
 }

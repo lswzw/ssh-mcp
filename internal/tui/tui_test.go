@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -595,6 +596,37 @@ func TestTargetListShowsRegisteredTargets(t *testing.T) {
 		t.Fatalf("target view = %s", view)
 	}
 
+}
+
+func TestTargetListPinsHintsOnTopAndFollowsSelection(t *testing.T) {
+	t.Parallel()
+
+	model := NewModel(nil)
+	_, _ = model.Update(tea.WindowSizeMsg{Width: 100, Height: 8})
+	model.screen = screenTargets
+	for index := 0; index < 12; index++ {
+		model.targets.SSH = append(model.targets.SSH, store.SSHTarget{IP: fmt.Sprintf("10.0.0.%d", index+1), Mode: store.SSHDirect, Enabled: true})
+	}
+
+	lines := strings.Split(model.View().Content, "\n")
+	if len(lines) != 8 {
+		t.Fatalf("target view height = %d, want 8: %s", len(lines), model.View().Content)
+	}
+	if lines[2] != model.msg.TargetsHelpFull {
+		t.Fatalf("help line = %q, want it pinned above the list: %s", lines[2], model.View().Content)
+	}
+	if !strings.Contains(lines[4], "1-3") || !strings.Contains(lines[4], "12") {
+		t.Fatalf("title does not report the visible range: %q", lines[4])
+	}
+
+	model.selected = 8
+	view := model.View().Content
+	if !strings.Contains(view, "10.0.0.9") || strings.Contains(view, "10.0.0.1 ") {
+		t.Fatalf("window did not follow the selection: %s", view)
+	}
+	if !strings.Contains(view, model.msg.TargetsHelpFull) {
+		t.Fatalf("help line missing from scrolled target view: %s", view)
+	}
 }
 
 func TestTargetDeleteUsesSingleConfirmationAndRefreshesList(t *testing.T) {

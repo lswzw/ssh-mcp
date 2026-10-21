@@ -65,6 +65,8 @@ In the target list (`t`), press `d` to register a database instance. Supported e
 - **Delete Target (`Delete`)**: Removes the target and its credentials permanently (requires typing `y` to confirm).
 - **Refresh (`r`)**: Reloads the target list from the database.
 
+The key hints stay pinned above the list. When the list is longer than the terminal, it is windowed and the title shows the visible range (for example `1-10 of 25`); the window follows the selected row.
+
 ---
 
 ## 4. Vault Encryption & Master Password
