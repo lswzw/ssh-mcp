@@ -64,7 +64,7 @@ func TestEngineUnverifiedDatabaseVersionDoesNotGateSQL(t *testing.T) {
 	}
 }
 
-func TestEngineHardStopReturnsChineseHandoff(t *testing.T) {
+func TestEngineDispatchesPreviouslyBlockedDestructiveCommands(t *testing.T) {
 	t.Parallel()
 
 	deps := newFakeDependencies()
@@ -74,27 +74,34 @@ func TestEngineHardStopReturnsChineseHandoff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunSSH() error = %v", err)
 	}
-	if result.Status != StatusRejected || result.Decision != policy.DecisionPermanentlyRejected ||
-		result.RuleID != string(policy.ReasonFormatOrPartition) || result.MatchedFragment == "" ||
-		result.HandoffCommand == "" || !strings.Contains(result.Message, "人工") ||
-		result.RemoteExecuted || deps.ssh.calls != 0 {
-		t.Fatalf("硬拦截结果 = %#v，SSH = %#v", result, deps.ssh)
+	if result.Status == StatusRejected || result.RuleID != "" || result.HandoffCommand != "" {
+		t.Fatalf("硬拦截仍生效 = %#v", result)
+	}
+	if deps.ssh.calls != 1 || deps.ssh.command != "mkfs.ext4 /dev/sdb" {
+		t.Fatalf("SSH 未派发 = %#v", deps.ssh)
+	}
+	if len(deps.audit.entries) == 0 || !deps.audit.entries[len(deps.audit.entries)-1].RemoteExecuted {
+		t.Fatalf("审计未记录远端执行 = %#v", deps.audit.entries)
 	}
 }
 
-func TestEngineSQLHardStopReturnsRuleID(t *testing.T) {
+func TestEngineDispatchesPreviouslyBlockedSQLStatements(t *testing.T) {
 	t.Parallel()
 
-	deps := newFakeDependencies()
-	result, err := deps.engine().RunSQL(context.Background(), SQLRequest{
-		Target: "192.0.2.20:5432", Database: "app", Statement: "DROP TABLE jobs",
-	})
-	if err != nil {
-		t.Fatalf("RunSQL() error = %v", err)
-	}
-	if result.Status != StatusRejected || result.RuleID != string(policy.ReasonDropDatabaseSchemaTable) ||
-		result.MatchedFragment == "" || result.HandoffCommand == "" || result.RemoteExecuted || deps.database.executeCalls != 0 {
-		t.Fatalf("SQL 硬拦截结果 = %#v，数据库 = %#v", result, deps.database)
+	for _, statement := range []string{"DROP TABLE jobs", "DELETE FROM jobs", "TRUNCATE jobs"} {
+		deps := newFakeDependencies()
+		result, err := deps.engine().RunSQL(context.Background(), SQLRequest{
+			Target: "192.0.2.20:5432", Database: "app", Statement: statement,
+		})
+		if err != nil {
+			t.Fatalf("RunSQL(%q) error = %v", statement, err)
+		}
+		if result.Status == StatusRejected || result.RuleID != "" || result.HandoffCommand != "" {
+			t.Fatalf("SQL(%q) 仍被拦截 = %#v", statement, result)
+		}
+		if deps.database.executeCalls != 1 {
+			t.Fatalf("SQL(%q) 未派发 = %#v", statement, deps.database)
+		}
 	}
 }
 

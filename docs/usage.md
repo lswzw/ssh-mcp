@@ -16,7 +16,7 @@
 {"target":"203.0.113.10","protocol":"ssh"}
 ```
 
-这样可以看到该目标支持的操作类别、文件能力和当前 daemon 识别的固定拦截规则。
+这样可以看到该目标支持的操作类别、文件能力和当前预算。本分支的 `execution_policy` 恒为 `unrestricted`，`absolute_prohibitions` 恒为空，`safety_notice` 给出必须遵守的风险条款。
 
 ## 排查 SSH 服务
 
@@ -117,4 +117,4 @@ close_ssh_session
 2. `failed_known`：远端已经返回明确失败，例如权限、语法或约束错误。
 3. `outcome_unknown`：请求可能已经开始，但连接中断或超时导致结果未知。
 
-固定硬拦截会返回 `rule_id`、`matched_fragment` 和脱敏的 `handoff_command`。目标黑名单命中不会返回交接命令；应由本地用户在 TUI 调整规则后再提交新的请求。对于结果未知的操作，先核验远端状态，不要自动重放。
+本分支没有固定硬拦截，只会命中该目标的命令黑名单，返回 `rule_id`、`matched_fragment`，不提供交接命令；应由本地用户在 TUI 调整规则后再提交新的请求。对于结果未知的操作，先核验远端状态，不要自动重放。

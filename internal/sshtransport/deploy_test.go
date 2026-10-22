@@ -115,27 +115,6 @@ func TestDeployBinaryWritesExclusiveTemporaryFileWithoutPermissionChanges(t *tes
 	}
 }
 
-func TestDeployBinaryRefusesToCreateUnbackedTarget(t *testing.T) {
-	t.Parallel()
-
-	const target = "/srv/app/bin/missing"
-	fs := newDeployContractFS(target, []byte("old"))
-	fs.targetMissing = true
-	client := newDeployContractClient(t, fs)
-
-	_, err := client.DeployBinary(context.Background(), bytes.NewReader([]byte("new")), BinaryDeploymentRequest{
-		RemotePath: target, ExpectedSize: 3, ExpectedSHA256: deploySHA256([]byte("new")), MaxBytes: 3,
-	})
-	if err == nil {
-		t.Fatal("DeployBinary() unexpectedly created a target without a backup")
-	}
-	fs.mu.Lock()
-	defer fs.mu.Unlock()
-	if len(fs.renames) != 0 || fs.writeCount != 0 {
-		t.Fatalf("unbacked deployment changed remote state: writes=%d renames=%#v", fs.writeCount, fs.renames)
-	}
-}
-
 func TestDeployBinaryRejectsSymlinkAndNonRegularTargetBeforeUpload(t *testing.T) {
 	t.Parallel()
 
@@ -581,6 +560,7 @@ type deployContractFS struct {
 	writeCount              int
 	openWrites              []string
 	renames                 [][2]string
+	dirs                    map[string]os.FileMode
 	backupNameExists        bool
 	backupRenameErr         error
 	nilBackupLstat          bool
@@ -600,11 +580,58 @@ type deployContractFS struct {
 	removeBeforeWriterClose bool
 }
 
+func TestDeployBinaryCreatesMissingTargetWithoutBackup(t *testing.T) {
+	t.Parallel()
+
+	const target = "/srv/app/bin/service"
+	fs := newDeployContractFS(target, nil)
+	fs.targetMissing = true
+	delete(fs.files, target)
+	client := newDeployContractClient(t, fs)
+	payload := []byte("new")
+	result, err := client.DeployBinary(context.Background(), bytes.NewReader(payload), BinaryDeploymentRequest{
+		RemotePath: target, ExpectedSize: int64(len(payload)), ExpectedSHA256: deploySHA256(payload), MaxBytes: 3,
+	})
+	if err != nil {
+		t.Fatalf("DeployBinary() error = %v", err)
+	}
+	if !result.Created || !result.Activated || result.BackupPath != "" {
+		t.Fatalf("DeployBinary() = %#v, want created activation without backup", result)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.renames) != 1 || fs.renames[0][1] != target {
+		t.Fatalf("renames = %#v, want only temporary activation", fs.renames)
+	}
+}
+
+func TestDeployBinaryRejectsMissingParentDirectory(t *testing.T) {
+	t.Parallel()
+
+	const target = "/missing/bin/service"
+	fs := newDeployContractFS(target, nil)
+	fs.targetMissing = true
+	client := newDeployContractClient(t, fs)
+	payload := []byte("new")
+	_, err := client.DeployBinary(context.Background(), bytes.NewReader(payload), BinaryDeploymentRequest{
+		RemotePath: target, ExpectedSize: int64(len(payload)), ExpectedSHA256: deploySHA256(payload), MaxBytes: 3,
+	})
+	if !errors.Is(err, ErrDeploymentTargetDirectory) {
+		t.Fatalf("DeployBinary() error = %v, want missing target directory", err)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.renames) != 0 {
+		t.Fatalf("missing parent directory still renamed: %#v", fs.renames)
+	}
+}
+
 func newDeployContractFS(target string, oldPayload []byte) *deployContractFS {
 	return &deployContractFS{
 		targetPath:        target,
 		targetInfo:        deployContractInfo{mode: 0o755, size: int64(len(oldPayload))},
 		files:             map[string][]byte{target: append([]byte(nil), oldPayload...)},
+		dirs:              map[string]os.FileMode{"/srv/app/bin": 0o755},
 		activationStarted: make(chan struct{}),
 		activationRelease: make(chan struct{}),
 	}
@@ -613,6 +640,9 @@ func newDeployContractFS(target string, oldPayload []byte) *deployContractFS {
 func (f *deployContractFS) Lstat(remotePath string) (os.FileInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if mode, ok := f.dirs[remotePath]; ok {
+		return deployContractInfo{mode: mode | os.ModeDir}, nil
+	}
 	if remotePath == f.targetPath {
 		if f.targetMissing {
 			return nil, os.ErrNotExist

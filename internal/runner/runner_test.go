@@ -50,9 +50,13 @@ func TestEngineDescribesRegisteredExecutionSpecificationWithoutSecretsOrRemoteAc
 		t.Fatalf("DescribeExecutionSpecification() error = %v", err)
 	}
 	if capability.Target != "192.0.2.10" || capability.Protocol != ProtocolSSH || capability.PolicyVersion != policy.Version ||
-		len(capability.DirectExecution) == 0 || !slices.Contains(capability.AbsoluteProhibitions, string(policy.ReasonFormatOrPartition)) ||
-		capability.DefaultOutputBytes != 16<<10 {
+		len(capability.DirectExecution) == 0 || capability.ExecutionPolicy != ExecutionPolicyUnrestricted ||
+		len(capability.AbsoluteProhibitions) != 0 || len(capability.SafetyNotice) == 0 ||
+		capability.DefaultOutputBytes != 64<<10 {
 		t.Fatalf("DescribeExecutionSpecification() = %#v", capability)
+	}
+	if !slices.Equal(capability.SafetyNotice, policy.SafetyNotice()) {
+		t.Fatalf("SafetyNotice() = %#v, want policy notice", capability.SafetyNotice)
 	}
 	if deps.openedTUI != 0 || deps.sessions.touched != 0 || deps.ssh.calls != 0 || deps.database.queryCalls != 0 {
 		t.Fatalf("DescribeExecutionSpecification() touched remote state: %#v", deps)
@@ -550,17 +554,16 @@ func TestEngineAllowsRawSSHSessionCommandWithinStructuredContext(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsKnownRelativeSSHWorkSessionPathsWithoutRemoteDispatch(t *testing.T) {
+func TestEngineDispatchesPreviouslyBlockedSessionCommands(t *testing.T) {
 	t.Parallel()
 
 	for _, test := range []struct {
 		name      string
 		directory string
 		command   string
-		rule      policy.Reason
 	}{
-		{name: "base system directory", directory: "/etc", command: "rm -rf .", rule: policy.ReasonBaseSystemTreeDestruction},
-		{name: "raw block destination", directory: "/dev", command: "printf x > sdb", rule: policy.ReasonRawBlockDeviceWrite},
+		{name: "base system directory", directory: "/etc", command: "rm -rf ."},
+		{name: "raw block destination", directory: "/dev", command: "printf x > sdb"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			deps := newFakeDependencies()
@@ -579,11 +582,11 @@ func TestEngineRejectsKnownRelativeSSHWorkSessionPathsWithoutRemoteDispatch(t *t
 			if err != nil {
 				t.Fatalf("ExecuteSSHSession() error = %v", err)
 			}
-			if result.Status != StatusRejected || result.Decision != policy.DecisionPermanentlyRejected || result.Reason != test.rule || result.HandoffCommand == "" || result.RemoteExecuted || deps.ssh.calls != 0 {
-				t.Fatalf("ExecuteSSHSession() = %#v, ssh = %#v", result, deps.ssh)
+			if result.Status == StatusRejected || result.RuleID != "" || result.HandoffCommand != "" {
+				t.Fatalf("ExecuteSSHSession() = %#v, want dispatch without rules", result)
 			}
-			if want := "cd '" + test.directory + "' &&"; !strings.Contains(result.HandoffCommand, want) {
-				t.Fatalf("ExecuteSSHSession() handoff = %q, want declared working directory %q", result.HandoffCommand, want)
+			if deps.ssh.calls != 1 || !strings.Contains(deps.ssh.command, test.command) {
+				t.Fatalf("ssh dispatch = %#v", deps.ssh)
 			}
 		})
 	}
@@ -737,7 +740,7 @@ func TestEngineAllowsNestedHopToRegisteredSSHIdentity(t *testing.T) {
 	}
 }
 
-func TestEngineRejectsNestedHopToUnregisteredSSHIdentity(t *testing.T) {
+func TestEngineDispatchesNestedHopToUnregisteredSSHIdentity(t *testing.T) {
 	t.Parallel()
 
 	deps := newFakeDependencies()
@@ -748,31 +751,8 @@ func TestEngineRejectsNestedHopToUnregisteredSSHIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunSSH() error = %v", err)
 	}
-	if result.Status != StatusRejected || result.Decision != policy.DecisionPermanentlyRejected ||
-		result.RuleID != string(policy.ReasonUnregisteredRemoteHop) || result.HandoffCommand == "" || deps.ssh.calls != 0 {
-		t.Fatalf("RunSSH() = %#v, ssh = %#v", result, deps.ssh)
-	}
-}
-
-func TestEngineRejectsFixedSSHHardStopWithoutRemoteDispatch(t *testing.T) {
-	t.Parallel()
-
-	deps := newFakeDependencies()
-	result, err := deps.engine().RunSSH(context.Background(), SSHRequest{Target: "192.0.2.10", Command: "mkfs.ext4 /dev/sdb"})
-	if err != nil {
-		t.Fatalf("RunSSH() error = %v", err)
-	}
-	if result.Status != StatusRejected || result.Decision != policy.DecisionPermanentlyRejected ||
-		result.RuleID != string(policy.ReasonFormatOrPartition) || result.HandoffCommand == "" || deps.ssh.calls != 0 {
-		t.Fatalf("RunSSH() = %#v, ssh = %#v", result, deps.ssh)
-	}
-	for _, required := range []string{"当前用户请求任务链", "改写、变形或重试", "同一效果", "MCP 外"} {
-		if !strings.Contains(result.Message, required) {
-			t.Fatalf("RunSSH() message = %q, missing %q", result.Message, required)
-		}
-	}
-	if len(deps.audit.entries) != 1 || deps.audit.entries[0].Phase != auditlog.PhaseDecision || deps.audit.entries[0].RemoteExecuted || deps.audit.entries[0].Policy.Reason != string(policy.ReasonFormatOrPartition) {
-		t.Fatalf("fixed hard-stop audit = %#v", deps.audit.entries)
+	if result.Status == StatusRejected || result.RuleID != "" || deps.ssh.calls != 1 {
+		t.Fatalf("RunSSH() = %#v, ssh = %#v, want dispatch", result, deps.ssh)
 	}
 }
 

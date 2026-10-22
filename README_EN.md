@@ -5,7 +5,9 @@
 
 [English](README_EN.md) | [中文说明](README.md)
 
-**Security-First Local SSH & Database MCP Server for AI Agents**
+> **Fork notice (unrestricted branch)**: This branch deletes every fixed hard-stop rule. Any command or SQL that does not match the per-target command blacklist is dispatched for real. It is meant for a **single-operator, private, mistake-tolerant** environment, does not follow or merge upstream, and is unsuitable for shared or multi-tenant use. The safety contract now lives in the instructions returned to the agent (`mcpInstructions` and `describe_target_capability.safety_notice`) plus the per-target regex blacklist. Use upstream if you want the interception model.
+
+**Local SSH & Database MCP Server for AI Agents (unrestricted fork)**
 
 `ssh-mcp` is a secure, local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that bridges AI coding assistants (Claude Desktop, Cursor, Codex CLI, Cline, Windsurf, etc.) to your Linux SSH hosts, MySQL/MariaDB, and PostgreSQL databases via **MCP over stdio**.
 
@@ -28,34 +30,30 @@ It enables AI agents to execute troubleshooting commands, inspect log files, que
 
 ## Why ssh-mcp? (Security Architecture)
 
-Giving an LLM unconstrained terminal access (`bash` or raw `ssh`) is dangerous: a single hallucination or malicious prompt injection can result in `rm -rf /`, dropped production databases, leaked credentials, or unauthorized lateral network movement. 
+Giving an LLM terminal access is dangerous: a single hallucination or prompt injection can result in `rm -rf /`, dropped production databases, or leaked credentials. **This fork deliberately does not try to prevent that with local command rules.** It removes every fixed hard-stop rule and moves the safety contract into the instructions returned to the agent, plus the per-target command blacklist you configure yourself.
 
-`ssh-mcp` is engineered from the ground up as a **security control plane** between AI agents and your infrastructure.
+> [!WARNING]
+> In this branch `run_ssh`, `execute_ssh_session`, `run_sql`, and `deploy_ssh_binary` dispatch whatever the agent submits. There is no `format_or_partition` / `base_system_tree_destruction` / `opaque_shell_effect` / `unregistered_remote_hop` / `unconditional_write` interception. Use it only in a private, single-operator environment where a mistake is survivable.
 
-### The 5 Security Pillars
+### What still protects you
 
-1. 🛡️ **Zero Credential Exposure**: Plaintext passwords, master passwords, and database credentials are encrypted at rest in a local vault. The AI agent and MCP client **never** see, receive, or handle credentials.
-2. 🚫 **11 Built-in Pre-Dispatch Hard Guardrails**: Destructive commands and high-risk operations are analyzed and intercepted locally by the daemon *before* reaching the network:
-   - **System destruction**: Blocks `rm -rf /`, `/boot`, `/etc`, `/usr`, `/proc`, etc. (`base_system_tree_destruction`).
-   - **Disk destruction**: Blocks formatting, partitioning, and raw block device overwrites (`format_or_partition`, `raw_block_device_write`).
-   - **Dangerous database changes**: Intercepts `DROP DATABASE/TABLE`, `TRUNCATE`, `ALTER ... DROP`, and unconditional `UPDATE`/`DELETE` without `WHERE` clauses.
-   - **Opaque shell payloads**: Rejects `eval`, `source`, `curl | sh`, dynamic substitutions, and base64-encoded executions (`opaque_shell_effect`).
-   - **Lateral movement**: Strictly blocks nested SSH/SCP/SFTP hops or unauthorized port forwards to unregistered IPs (`unregistered_remote_hop`).
-3. 🎯 **Strict Target Whitelisting & Fingerprint Pinning**: The agent cannot scan subnets or connect to arbitrary IPs. It can only interact with explicitly enabled targets registered by you in the local TUI. SSH host keys are pinned upon registration and strictly verified against MITM attacks on every connection.
-4. 📦 **Atomic & Verified Deployments**: Binary updates (`deploy_ssh_binary`) validate file size and SHA-256 pre-flight, stage to a temporary file, create an automated rollback backup of existing binaries, and perform an atomic activation. Ambiguous outcomes trigger an alert without blind auto-retries.
-5. 🔒 **Untrusted Remote Output Isolation**: All remote stdout/stderr and query results are treated as untrusted inputs, preventing remote outputs from altering daemon authorization or bypassing policy boundaries.
+1. 🛡️ **Zero credential exposure**: Plaintext passwords, master passwords, and database credentials stay in the local encrypted vault. The AI agent and MCP client never see them.
+2. 🎯 **Registered targets only**: The agent cannot invent hosts. `target` must be an enabled entry registered in the local TUI, and SSH host keys are pinned on every connection.
+3. 🧭 **Explicit, honest declarations**: `describe_target_capability` returns `execution_policy: "unrestricted"` and a `safety_notice` list; an empty `absolute_prohibitions` array is reported as empty rather than implying rules that do not exist.
+4. 📦 **Atomic, verified deployments**: `deploy_ssh_binary` verifies size and SHA-256, stages a temporary file, backs up an existing target, then activates. A missing target is created; a missing parent directory is refused. Ambiguous outcomes are reported as `outcome_unknown` and never auto-retried.
+5. 🔒 **Untrusted remote output isolation**: Remote stdout/stderr and query results are always flagged `untrusted_remote_output`, so remote text cannot act as local instructions.
 
-### Comparison: ssh-mcp vs. Generic Bash / Naive SSH MCP Tools
+### Comparison: this fork vs. upstream ssh-mcp
 
-| Security Dimension | Naive Bash / SSH Tools | `ssh-mcp` Control Plane |
+| Dimension | Upstream `ssh-mcp` | This fork |
 | :--- | :--- | :--- |
-| **Credential Handling** | Passed in environment variables or prompts | **Zero-exposure local encrypted vault** |
-| **Host Key Verification** | Disabled (`StrictHostKeyChecking=no`) or ignored | **Host key fingerprint pinned and verified** |
-| **Blast Radius Protection** | None; hallucinated `rm -rf` executes immediately | **11 hard-coded pre-dispatch guardrails** |
-| **Target Boundary** | Any reachable IP/hostname | **Strict local whitelist; no lateral hopping** |
-| **Database Safeguards** | Full read/write connection string exposed | **Segregated read-only/read-write + query guardrails** |
-| **File Deployment** | Unchecked blind overwrite via `scp` or `echo` | **Pre-flight SHA-256 + atomic swap + auto-backup** |
-| **Custom Restrictions** | Complex shell wrappers required | **Per-target regex command blacklists** |
+| **Credential Handling** | Zero-exposure local encrypted vault | Same |
+| **Host Key Verification** | Pinned and verified | Same |
+| **Blast Radius Protection** | 11 hard-coded pre-dispatch guardrails | **None enforced locally; relies on agent instructions and user confirmation** |
+| **Target Boundary** | Registered targets; nested hops blocked | Registered entry targets only; **nested hops from inside a command are not inspected** |
+| **Database Safeguards** | Segregated read/write accounts + semantic guardrails | Segregated read/write accounts; **no semantic guardrails** |
+| **File Deployment** | Pre-flight SHA-256 + atomic swap + auto-backup | Same, plus creating a missing target file |
+| **Custom Restrictions** | Per-target regex command blacklists | Same (the only local interception that remains) |
 
 ---
 
@@ -196,7 +194,7 @@ Using ssh-mcp, query the replica database for the top 5 slowest queries recorded
 | :--- | :--- | :--- |
 | `list_targets` | Discovery | Lists registered SSH and database targets with status and capabilities. |
 | `describe_target_capability` | Discovery | Inspects allowed operations (file transfer, writable DB, session support). |
-| `run_ssh_command` | SSH Execution | Executes a non-interactive Linux command on a target host subject to guardrails. |
+| `run_ssh_command` | SSH Execution | Executes a non-interactive Linux command on a target host; only the per-target blacklist can stop it. |
 | `create_ssh_work_session` | SSH Session | Initializes a dedicated working session maintaining remote state/directory. |
 | `run_ssh_session_command` | SSH Session | Runs a command inside an active SSH working session. |
 | `close_ssh_work_session` | SSH Session | Explicitly closes an active working session. |

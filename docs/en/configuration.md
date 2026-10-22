@@ -33,7 +33,7 @@ rm /data/.*, cat /etc/passwd, passwd.*
 ```
 
 > [!NOTE]
-> The target-level blacklist only adds extra restrictions; it cannot bypass the 11 built-in pre-dispatch guardrails. Leaving this field blank means relying solely on the built-in system guardrails. Updating a blacklist automatically invalidates active SSH working sessions for that target.
+> The target-level blacklist is the only local interception in this fork; there are no built-in pre-dispatch guardrails. Leaving this field blank means nothing stops a command locally. Updating a blacklist automatically invalidates active SSH working sessions for that target.
 
 ---
 

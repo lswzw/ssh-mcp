@@ -30,7 +30,7 @@ const (
 
 var (
 	ErrInvalidBinaryDeployment    = errors.New("invalid SSH binary deployment")
-	ErrDeploymentTargetNotFound   = errors.New("SSH deployment target file was not found")
+	ErrDeploymentTargetDirectory  = errors.New("SSH deployment target directory was not found")
 	ErrDeploymentTargetSymlink    = errors.New("SSH deployment target rejects symbolic links")
 	ErrDeploymentTargetNotRegular = errors.New("SSH deployment target requires a regular file")
 	ErrDeploymentTargetChanged    = errors.New("SSH deployment target changed during deployment")
@@ -55,11 +55,14 @@ type BinaryDeploymentRequest struct {
 // BinaryDeploymentResult contains metadata only; it never contains source
 // bytes or remote command output.
 type BinaryDeploymentResult struct {
-	RemotePath    string `json:"remote_path"`
+	RemotePath string `json:"remote_path"`
+	// BackupPath is empty when the target did not exist and the deployment
+	// created it; there is nothing to roll back to in that case.
 	BackupPath    string `json:"backup_path"`
 	BytesUploaded int64  `json:"bytes_uploaded"`
 	SHA256        string `json:"sha256"`
 	Activated     bool   `json:"activated"`
+	Created       bool   `json:"created"`
 }
 
 // deploymentProtocol is the deliberately tiny write boundary used by the
@@ -155,10 +158,20 @@ func (c *Client) DeployBinary(ctx context.Context, source io.Reader, request Bin
 	targetInfo, err := callDeployment(ctx, closeProtocol, func() (os.FileInfo, error) {
 		return protocol.Lstat(request.RemotePath)
 	})
+	targetExists := true
 	if err != nil {
-		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err, true)
-	}
-	if err := validateDeploymentTargetInfo(targetInfo); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err)
+		}
+		// A missing target is deployed as a new file. The parent directory is
+		// never created implicitly: a mistyped path must fail instead of
+		// silently building a new tree somewhere else.
+		targetExists = false
+		targetInfo = nil
+		if err := requireDeploymentParentDirectory(ctx, closeProtocol, protocol, request.RemotePath); err != nil {
+			return BinaryDeploymentResult{}, err
+		}
+	} else if err := validateDeploymentTargetInfo(targetInfo); err != nil {
 		return BinaryDeploymentResult{}, err
 	}
 
@@ -188,7 +201,7 @@ func (c *Client) DeployBinary(ctx context.Context, source io.Reader, request Bin
 		return protocol.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
 	})
 	if err != nil {
-		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err, false)
+		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err)
 	}
 	tempCreated = true
 	writerClosed := false
@@ -212,6 +225,42 @@ func (c *Client) DeployBinary(ctx context.Context, source io.Reader, request Bin
 		return BinaryDeploymentResult{}, err
 	}
 
+	partial := BinaryDeploymentResult{
+		RemotePath:    request.RemotePath,
+		BackupPath:    backupPath,
+		BytesUploaded: request.ExpectedSize,
+		SHA256:        expectedSHA,
+	}
+	if !targetExists {
+		// Nothing to back up. Re-check absence immediately before activation so
+		// a concurrently created file is never replaced silently.
+		_, err = callDeployment(ctx, closeProtocol, func() (os.FileInfo, error) {
+			return protocol.Lstat(request.RemotePath)
+		})
+		if err == nil {
+			return BinaryDeploymentResult{}, ErrDeploymentTargetChanged
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err)
+		}
+		partial.BackupPath = ""
+		partial.Created = true
+		preserveTemporary = true
+		activationErr := callDeploymentError(ctx, closeProtocol, func() error {
+			return protocol.Rename(tempPath, request.RemotePath)
+		})
+		if activationErr != nil || ctx.Err() != nil {
+			if ctx.Err() != nil {
+				return partial, ErrDeploymentOutcomeUnknown
+			}
+			preserveTemporary = false
+			return partial, ErrDeploymentActivationFailed
+		}
+		activated = true
+		partial.Activated = true
+		return partial, nil
+	}
+
 	// Re-read the live target immediately before the first mutating operation.
 	// This does not claim to defeat a malicious remote filesystem, but prevents
 	// ordinary replacement races from silently moving a different file.
@@ -219,7 +268,7 @@ func (c *Client) DeployBinary(ctx context.Context, source io.Reader, request Bin
 		return protocol.Lstat(request.RemotePath)
 	})
 	if err != nil {
-		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err, true)
+		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, err)
 	}
 	if err := validateDeploymentTargetInfo(currentInfo); err != nil {
 		return BinaryDeploymentResult{}, err
@@ -241,15 +290,9 @@ func (c *Client) DeployBinary(ctx context.Context, source io.Reader, request Bin
 		return BinaryDeploymentResult{}, ErrDeploymentBackupExists
 	}
 	if backupErr != nil && !errors.Is(backupErr, os.ErrNotExist) {
-		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, backupErr, false)
+		return BinaryDeploymentResult{}, classifyDeploymentPreparationError(ctx, backupErr)
 	}
 
-	partial := BinaryDeploymentResult{
-		RemotePath:    request.RemotePath,
-		BackupPath:    backupPath,
-		BytesUploaded: request.ExpectedSize,
-		SHA256:        expectedSHA,
-	}
 	// This is the mandatory backup gate. Never activate the temporary file
 	// before this server-side rename has been dispatched successfully.
 	preserveTemporary = true
@@ -303,6 +346,28 @@ func (c *Client) DeployBinary(ctx context.Context, source io.Reader, request Bin
 	return partial, nil
 }
 
+// requireDeploymentParentDirectory fails closed when the target's parent
+// directory is missing: the deployment never creates directories.
+func requireDeploymentParentDirectory(ctx context.Context, closeProtocol func(), protocol deploymentProtocol, remotePath string) error {
+	parent := path.Dir(remotePath)
+	if parent == remotePath || parent == "/" || parent == "." {
+		return nil
+	}
+	info, err := callDeployment(ctx, closeProtocol, func() (os.FileInfo, error) {
+		return protocol.Lstat(parent)
+	})
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrDeploymentTargetDirectory
+		}
+		return classifyDeploymentPreparationError(ctx, err)
+	}
+	if info == nil || !info.IsDir() {
+		return ErrDeploymentTargetDirectory
+	}
+	return nil
+}
+
 func validateBinaryDeploymentRequest(source io.Reader, request *BinaryDeploymentRequest) (string, error) {
 	if source == nil || request == nil || request.RemotePath == "/" || !isCanonicalDeploymentPath(request.RemotePath) {
 		return "", ErrInvalidBinaryDeployment
@@ -341,7 +406,7 @@ func isCanonicalDeploymentPath(remotePath string) bool {
 
 func validateDeploymentTargetInfo(info os.FileInfo) error {
 	if info == nil {
-		return ErrDeploymentTargetNotFound
+		return ErrDeploymentFailed
 	}
 	mode := info.Mode()
 	if mode&os.ModeSymlink != 0 {
@@ -443,7 +508,7 @@ func verifyDeploymentTemporary(ctx context.Context, closeProtocol func(), protoc
 		return protocol.Lstat(tempPath)
 	})
 	if err != nil {
-		return classifyDeploymentPreparationError(ctx, err, false)
+		return classifyDeploymentPreparationError(ctx, err)
 	}
 	if err := validateDeploymentTargetInfo(info); err != nil || info.Size() != expectedSize {
 		return ErrDeploymentIntegrity
@@ -452,7 +517,7 @@ func verifyDeploymentTemporary(ctx context.Context, closeProtocol func(), protoc
 		return protocol.Open(tempPath)
 	})
 	if err != nil {
-		return classifyDeploymentPreparationError(ctx, err, false)
+		return classifyDeploymentPreparationError(ctx, err)
 	}
 	defer file.Close()
 	hash := sha256.New()
@@ -534,12 +599,12 @@ func rollbackDeployment(ctx context.Context, closeProtocol func(), protocol depl
 	return nil
 }
 
-func classifyDeploymentPreparationError(ctx context.Context, err error, target bool) error {
+func classifyDeploymentPreparationError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ErrDeploymentOutcomeUnknown
 	}
-	if target && errors.Is(err, os.ErrNotExist) {
-		return ErrDeploymentTargetNotFound
+	if errors.Is(err, os.ErrNotExist) {
+		return ErrDeploymentTargetDirectory
 	}
 	if errors.Is(err, os.ErrExist) {
 		return ErrDeploymentBackupExists

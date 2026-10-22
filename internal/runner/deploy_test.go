@@ -114,7 +114,7 @@ func TestDeploySSHBinaryDisabledCapabilityWinsOverMissingDeployer(t *testing.T) 
 	}
 }
 
-func TestDeploySSHBinaryRejectsBlockedStartActionBeforeActivation(t *testing.T) {
+func TestDeploySSHBinaryRunsPreviouslyBlockedStartAction(t *testing.T) {
 	t.Parallel()
 
 	payload := []byte("payload")
@@ -136,8 +136,9 @@ func TestDeploySSHBinaryRejectsBlockedStartActionBeforeActivation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("DeploySSHBinary() error = %v", err)
 	}
-	if result.Status != StatusRejected || result.ExecutionOutcome != StatusNotDispatched || result.RemoteExecuted || result.FailureKind != FailureKindDeploymentSource || deployer.calls != 0 || deps.ssh.calls != 0 || deps.ssh.isolatedCalls != 0 {
-		t.Fatalf("blocked start action = %#v, deployer = %#v, ssh = %#v", result, deployer, deps.ssh)
+	if result.Status != StatusCompleted || !result.RemoteExecuted || deployer.calls != 1 ||
+		deps.ssh.isolatedCalls != 1 || deps.ssh.command != "rm -rf /" {
+		t.Fatalf("start action = %#v, deployer = %#v, ssh = %#v", result, deployer, deps.ssh)
 	}
 }
 
@@ -260,7 +261,7 @@ func TestDeploySSHBinaryReportsPreconditionFailureKinds(t *testing.T) {
 		kind     string
 		contains string
 	}{
-		{"missing target", sshtransport.ErrDeploymentTargetNotFound, FailureKindDeploymentTargetNotFound, "占位"},
+		{"missing parent directory", sshtransport.ErrDeploymentTargetDirectory, FailureKindDeploymentTargetDirectory, "目录"},
 		{"backup exists", sshtransport.ErrDeploymentBackupExists, FailureKindDeploymentBackupExists, "备份"},
 	}
 	for _, testCase := range cases {

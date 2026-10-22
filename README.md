@@ -4,6 +4,8 @@
 
 [English Documentation](README_EN.md) | [中文说明](README.md)
 
+> **Fork 声明（unrestricted 分支）**：本分支移除了上游的全部固定硬拦截规则，命令与 SQL 语义不再被本地规则拦截，命中目标命令黑名单以外的请求都会真实派发。它只适用于**单人、私有、可承受误操作**的实验环境，不跟随上游、不合并上游，也不适用于共享或多人环境。安全防线改为返回给 AI 的提示词（`mcpInstructions` 与 `describe_target_capability.safety_notice`），以及本地 TUI 中按目标配置的命令黑名单。若你需要上游的拦截模型，请使用上游分支。
+
 **Local SSH MCP server for MCP-compatible agents | 面向 AI 运维的本地 MCP 桥接服务**
 
 `ssh-mcp` 是一个可供 **支持 MCP 的 AI Agent/客户端使用的本地 SSH MCP server**，通过 **Model Context Protocol (MCP) over stdio** 让 AI 使用你在本机登记的 Linux SSH 主机、MySQL/MariaDB 和 PostgreSQL 数据库，完成排障、查询、文件查看和文件部署。
@@ -24,7 +26,7 @@
 
 - **一个入口完成日常运维**：SSH 命令、SQL、受限文件读取、文件部署和 SSH 工作会话都通过 MCP 提供。
 - **目标明确**：只能访问本地登记且启用的目标，不扫描网络，也不会把凭据交给 AI 或 MCP 客户端。
-- **安全边界清楚**：常规运维请求直接执行；格式化磁盘、破坏系统目录、无条件批量写入等固定高危类别在派发前拦截；每个 SSH 目标还可以配置正则黑名单。
+- **边界显式声明**：本分支不存在固定硬拦截，所有命令与 SQL 都会真实执行；唯一的本地拦截是每个 SSH 目标可配置的正则黑名单，其余安全约束由返回给 AI 的提示词（含不可逆操作确认协议）承担。
 - **部署可核验**：文件部署先校验大小和 SHA-256，再创建临时文件、备份现有文件并激活新文件；结果未知时保留核验和人工恢复所需的信息，不会自动重试。
 - **本地跨平台**：程序可运行在 Linux、macOS 和 Windows；远端 SSH 当前支持 Linux 命令语义。
 

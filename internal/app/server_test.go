@@ -12,6 +12,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"ssh-mcp/internal/auditlog"
+	"ssh-mcp/internal/policy"
 	"ssh-mcp/internal/runner"
 	"ssh-mcp/internal/sshtransport"
 	"ssh-mcp/internal/store"
@@ -69,7 +70,9 @@ func TestNewServerPublishesRemoteUseInstructions(t *testing.T) {
 	defer session.Close()
 
 	instructions := session.InitializeResult().Instructions
-	for _, required := range []string{"ssh-mcp", "MCP", "本地 shell", "登记目标", "describe_target_capability", "固定硬拦截", "命令黑名单", "target_command_blacklist", "当前用户请求任务链", "同一效果", "本地 TUI", "outcome_unknown", "不自动重试", "rule_id", "matched_fragment", "handoff_command", "MCP 外", "arguments 必须是单一、合法、完整的 JSON 对象字符串", "input schema", "代码围栏", `{"target":"192.0.2.10","command":"ls /data"}`} {
+	required := []string{"ssh-mcp", "MCP", "本地 shell", "登记目标", "describe_target_capability", "不存在任何命令或 SQL 语义层面的限制", "命令黑名单", "target_command_blacklist", "当前用户请求任务链", "同一效果", "本地 TUI", "outcome_unknown", "不自动重试", "safety_notice", "不可逆", "确认", "arguments 必须是单一、合法、完整的 JSON 对象字符串", "input schema", "代码围栏", `{"target":"192.0.2.10","command":"ls /data"}`}
+	required = append(required, policy.SafetyNotice()...)
+	for _, required := range required {
 		if !strings.Contains(instructions, required) {
 			t.Fatalf("instructions = %q, missing %q", instructions, required)
 		}
@@ -290,16 +293,20 @@ func TestMCPDescribesCapabilityWithoutOpeningVaultOrRemoteConnection(t *testing.
 		t.Fatalf("marshal structured capability: %v", err)
 	}
 	var capability struct {
-		Target              string `json:"target"`
-		Protocol            string `json:"protocol"`
-		PolicyVersion       string `json:"policy_version"`
-		DefaultOutputBytes  int    `json:"default_output_bytes"`
-		MaxOperationSeconds int    `json:"max_operation_seconds"`
+		Target              string   `json:"target"`
+		Protocol            string   `json:"protocol"`
+		PolicyVersion       string   `json:"policy_version"`
+		DefaultOutputBytes  int      `json:"default_output_bytes"`
+		MaxOperationSeconds int      `json:"max_operation_seconds"`
+		ExecutionPolicy     string   `json:"execution_policy"`
+		SafetyNotice        []string `json:"safety_notice"`
+		Prohibitions        []string `json:"absolute_prohibitions"`
 	}
 	if err := json.Unmarshal(encoded, &capability); err != nil {
 		t.Fatalf("unmarshal capability: %v", err)
 	}
-	if capability.Target != "192.0.2.10" || capability.Protocol != "ssh" || capability.PolicyVersion == "" || capability.DefaultOutputBytes != 16<<10 || capability.MaxOperationSeconds != 0 {
+	if capability.Target != "192.0.2.10" || capability.Protocol != "ssh" || capability.PolicyVersion == "" || capability.DefaultOutputBytes != 64<<10 || capability.MaxOperationSeconds != 0 ||
+		capability.ExecutionPolicy != runner.ExecutionPolicyUnrestricted || len(capability.SafetyNotice) == 0 || len(capability.Prohibitions) != 0 {
 		t.Fatalf("capability = %#v", capability)
 	}
 	cancel()
@@ -412,7 +419,7 @@ func TestMCPExecutesStaticSSHWithoutRemovedReviewWorkflow(t *testing.T) {
 	}
 }
 
-func TestMCPRejectsFixedSSHHardStopWithoutRemoteDispatch(t *testing.T) {
+func TestMCPDispatchesPreviouslyBlockedSSHCommand(t *testing.T) {
 	t.Parallel()
 
 	audit := &mcpTestAudit{}
@@ -423,7 +430,7 @@ func TestMCPRejectsFixedSSHHardStopWithoutRemoteDispatch(t *testing.T) {
 		SSH:       ssh,
 		Audit:     audit,
 		OpenTUI:   func() error { return nil },
-		SessionID: "mcp-prohibition-test",
+		SessionID: "mcp-unrestricted-test",
 	}))
 	serverTransport, clientTransport := mcp.NewInMemoryTransports()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -440,28 +447,29 @@ func TestMCPRejectsFixedSSHHardStopWithoutRemoteDispatch(t *testing.T) {
 	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "run_ssh", Arguments: map[string]any{
 		"target": "192.0.2.10", "command": "mkfs.ext4 /dev/sdb",
 	}})
-	if err != nil || result.IsError || mcpResultStatus(t, result) != runner.StatusRejected {
-		t.Fatalf("CallTool(run_ssh prohibited) result = %#v, error = %v", result, err)
+	if err != nil || result.IsError || mcpResultStatus(t, result) != runner.StatusCompleted {
+		t.Fatalf("CallTool(run_ssh destructive) result = %#v, error = %v", result, err)
 	}
 	encoded, err := json.Marshal(result.StructuredContent)
 	if err != nil {
-		t.Fatalf("marshal structured hard-stop result: %v", err)
+		t.Fatalf("marshal structured deployment result: %v", err)
 	}
 	var output struct {
 		RuleID          string `json:"rule_id"`
 		MatchedFragment string `json:"matched_fragment"`
 		HandoffCommand  string `json:"handoff_command"`
-		Message         string `json:"message"`
 	}
 	if err := json.Unmarshal(encoded, &output); err != nil {
-		t.Fatalf("unmarshal structured hard-stop result: %v", err)
+		t.Fatalf("unmarshal structured result: %v", err)
 	}
-	if output.RuleID == "" || output.MatchedFragment == "" || output.HandoffCommand == "" ||
-		!strings.Contains(output.Message, "操作未派发") || !strings.Contains(output.Message, "人工") || !strings.Contains(output.Message, "MCP 外") {
-		t.Fatalf("hard-stop result does not carry human handoff details: %#v", output)
+	if output.RuleID != "" || output.MatchedFragment != "" || output.HandoffCommand != "" {
+		t.Fatalf("dispatched command still reports local rules: %#v", output)
 	}
-	if len(audit.entries) != 1 || audit.entries[0].RemoteExecuted || audit.entries[0].Result.Status != runner.StatusRejected || ssh.calls != 0 {
-		t.Fatalf("prohibited audit = %#v, SSH calls = %d", audit.entries, ssh.calls)
+	if ssh.calls != 1 {
+		t.Fatalf("SSH dispatch = %#v", ssh)
+	}
+	if len(audit.entries) == 0 || !audit.entries[len(audit.entries)-1].RemoteExecuted {
+		t.Fatalf("dispatched audit = %#v", audit.entries)
 	}
 	cancel()
 	if err := <-serverDone; err != nil && err != context.Canceled {

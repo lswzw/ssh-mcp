@@ -1,6 +1,6 @@
 # 安全模型与限制
 
-`ssh-mcp` 的安全目标是把 AI 的远程操作限制在本地用户明确登记的目标，并在 daemon 能可靠识别的少数高危类别上停止派发。它不是主机沙箱、堡垒机或防篡改审计系统。
+本分支（unrestricted fork）的安全目标只剩两条：把 AI 的远程操作限制在本地用户明确登记的目标，并把风险事实如实告知调用方。它**不再**在命令或 SQL 语义层面停止派发，因此不是主机沙箱、堡垒机或防篡改审计系统；误操作保护主要由调用方遵守返回的提示词和本地用户自己配置的黑名单。
 
 ## 信任边界
 
@@ -35,31 +35,22 @@ SSH、SFTP 和数据库返回的数据始终是不可信输入。远端输出不
 
 常规运维命令和 SQL 默认直接执行，不存在日常审批队列或“严格/宽松”模式。固定规则和目标黑名单是额外的本地拒绝边界。
 
-## 固定硬拦截
+## 固定硬拦截：本分支已移除
 
-以下 11 个规则由 daemon 内置，命中后请求不会派发：
+上游的 11 条固定硬拦截（`format_or_partition`、`raw_block_device_write`、`base_system_tree_destruction`、`unbounded_resource_exhaustion`、`opaque_shell_effect`、`opaque_sql_effect`、`drop_database_schema_table`、`truncate_table`、`alter_drop`、`unconditional_update_or_delete`、`unregistered_remote_hop`）在本分支中**全部删除**。
 
-| 规则 ID | 拦截范围 |
-| --- | --- |
-| `format_or_partition` | 格式化、分区或破坏文件系统元数据。 |
-| `raw_block_device_write` | 直接写入或擦除块设备。 |
-| `base_system_tree_destruction` | 删除或递归破坏 `/`、`/boot`、`/etc`、`/bin`、`/sbin`、`/lib*`、`/usr`、`/dev`、`/proc`、`/sys`、`/run` 等基础系统目录。 |
-| `unbounded_resource_exhaustion` | 可识别的无界 CPU、内存、磁盘、进程或网络资源耗尽。 |
-| `opaque_shell_effect` | 无法静态确定效果的 Shell，例如 `eval`、`source`、动态替换、不可检查脚本、下载后执行或嵌入解释器代码。 |
-| `opaque_sql_effect` | 过程调用、动态 SQL、触发器/过程体，以及文件或主机副作用 SQL。 |
-| `drop_database_schema_table` | `DROP DATABASE`、`DROP SCHEMA`、`DROP TABLE`。 |
-| `truncate_table` | `TRUNCATE`。 |
-| `alter_drop` | `ALTER ... DROP`。 |
-| `unconditional_update_or_delete` | 没有 `WHERE` 或条件明显恒真的 `UPDATE`、`DELETE`。 |
-| `unregistered_remote_hop` | 通过嵌套 SSH、SCP、SFTP、隧道或类似方式访问未登记的第二个远端。 |
+- `policy.EvaluateSSH` 与 `policy.EvaluateSQL` 只做请求形状校验、目标黑名单匹配和预算归一化，不再产生 `absolute_prohibited`。
+- `describe_target_capability` 返回 `execution_policy: "unrestricted"`，`absolute_prohibitions` 恒为空数组，`safety_notice` 给出必须遵守的风险条款。
+- 这些规则 ID 常量仅为解码历史审计行而保留，本分支不会发出。
+- 通过 `run_ssh` 在目标机内部执行 `ssh other-host` 不再被识别；审计只覆盖第一跳。
 
-规则匹配是本地词法和结构分析，不是完整的命令语义证明。未命中规则不代表操作安全，也不限制 MCP 之外的路径。固定拦截结果会带 `rule_id`、`matched_fragment` 和经过脱敏的 `handoff_command`；在同一用户任务链中不要通过改写或变形去追求相同效果，应交由人工在 MCP 外复核。
+安全责任因此前移到提示词：daemon 返回的 `mcpInstructions` 与 `safety_notice` 要求调用方在派发不可逆操作前向当前用户复述命令并取得显式确认。这是约定，不是强制。
 
 ## SSH 目标黑名单
 
 每个 SSH 目标可以在 TUI 中配置英文逗号分隔的 Go RE2 正则。任一正则匹配命令文本（包括工作会话命令）就返回 `target_command_blacklist`，不会派发，也不会提供人工交接命令。
 
-黑名单只增加限制，不能放宽固定硬拦截，也不作用于数据库。只有本地用户在 TUI 明确修改规则后，新的请求才会按新规则判断。无效正则不能保存。
+黑名单是本分支唯一保留的本地拦截，不作用于数据库。只有本地用户在 TUI 明确修改规则后，新的请求才会按新规则判断。无效正则不能保存。
 
 ## SSH 身份与数据库传输
 
@@ -72,7 +63,7 @@ SSH、SFTP 和数据库返回的数据始终是不可信输入。远端输出不
 
 `read_ssh_file` 只读取规范化绝对路径的单个普通文件，不接受目录、符号链接、设备、FIFO 或 socket，也不把路径拼接进 Shell 命令。
 
-`deploy_ssh_binary` 使用独立的 SFTP 事务：临时文件上传、大小和 SHA-256 校验、同目录备份、重命名激活。源文件和远端目标都必须是普通文件，目标路径必须已存在。部署结果无法确认时不会自动重试；应先人工或通过受限读取核验 live 文件、备份和启动状态。
+`deploy_ssh_binary` 使用独立的 SFTP 事务：临时文件上传、大小和 SHA-256 校验、同目录备份、重命名激活。源文件必须是本机普通文件；目标已存在时必须是普通非符号链接文件并会被备份，目标不存在时直接创建（`created: true`、`backup_path` 为空），但**父目录必须已存在**，工具从不创建目录。部署结果无法确认时不会自动重试；应先人工或通过受限读取核验 live 文件、备份和启动状态。
 
 ## 凭据、状态和审计
 

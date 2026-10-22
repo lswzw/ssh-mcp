@@ -13,7 +13,7 @@ We take the security of `ssh-mcp` seriously. Because `ssh-mcp` governs infrastru
 - **Do NOT** disclose passwords, private keys, host credentials, or exploitable vulnerability details in public Issues, Discussions, or Pull Requests.
 - **Private Reporting**: Please report vulnerabilities confidentially via [GitHub Private Vulnerability Reporting](https://github.com/lswzw/ssh-mcp/security/advisories/new). If this interface is temporarily inaccessible, reach out to the project maintainers directly through their GitHub profiles.
 - **Details to Include**: Please specify the affected release version, host operating system, exact reproduction steps, and minimal proof-of-concept evidence.
-- For our security architecture, trust boundaries, and built-in guardrails, please consult the [Security Model Guide](docs/en/security-model.md) (or [Chinese version](docs/security-model.md)).
+- This fork removes the built-in guardrails; see the fork notice at the top of the README, then consult the [Security Model Guide](docs/en/security-model.md) (or [Chinese version](docs/security-model.md)) for the trust boundaries that remain.
 
 ---
 

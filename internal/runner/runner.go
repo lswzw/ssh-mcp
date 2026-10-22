@@ -150,34 +150,11 @@ func New(deps Dependencies) *Engine {
 }
 
 func (e *Engine) evaluateSSH(ctx context.Context, request policy.SSHRequest) policy.Result {
-	request.RegisteredRemoteTargets, request.RemoteTargetRegistryAvailable = e.registeredRemoteTargets(ctx)
 	return policy.EvaluateSSH(request)
 }
 
 func (e *Engine) evaluateSQL(request policy.SQLRequest) policy.Result {
 	return policy.EvaluateSQL(request)
-}
-
-// registeredRemoteTargets supplies the policy with the local, non-secret
-// identity snapshot used to authorize nested SSH-family destinations. A
-// registry read failure deliberately leaves the snapshot unavailable, which
-// makes only nested remote hops fail closed under their fixed hard-stop rule.
-func (e *Engine) registeredRemoteTargets(ctx context.Context) ([]policy.RegisteredRemoteTarget, bool) {
-	if e == nil || e.deps.Targets == nil {
-		return nil, false
-	}
-	targets, err := e.deps.Targets.ListSSHTargets(ctx)
-	if err != nil {
-		return nil, false
-	}
-	registered := make([]policy.RegisteredRemoteTarget, 0, len(targets))
-	for _, target := range targets {
-		if !target.Enabled {
-			continue
-		}
-		registered = append(registered, policy.RegisteredRemoteTarget{Host: target.IP, Port: sshPort(target)})
-	}
-	return registered, true
 }
 
 // WithAuditSession retains compatibility for callers that only have a bridge ID.
@@ -276,6 +253,11 @@ const (
 	ProtocolSQL TargetProtocol = "sql"
 )
 
+// ExecutionPolicyUnrestricted reports that this daemon has no fixed hard-stop
+// rule registry. The wire value is intentionally explicit so a caller never
+// has to infer the policy from an empty list.
+const ExecutionPolicyUnrestricted = "unrestricted"
+
 // ExecutionSpecificationRequest asks only for a registered target's declared
 // execution boundary. It never requires a vault or a remote connection.
 type ExecutionSpecificationRequest struct {
@@ -291,9 +273,13 @@ type ExecutionSpecification struct {
 	Available       bool           `json:"available"`
 	PolicyVersion   string         `json:"policy_version"`
 	DirectExecution []string       `json:"direct_execution"`
-	// AbsoluteProhibitions is retained for protocol compatibility. It lists
-	// only fixed hard-stop IDs recognized by this daemon version, rather than
-	// a semantic or MCP-external universal prohibition.
+	// ExecutionPolicy is "unrestricted" in this fork: no fixed hard-stop rule
+	// registry exists. AbsoluteProhibitions is retained for protocol
+	// compatibility and is always an empty array, never null.
+	ExecutionPolicy string `json:"execution_policy"`
+	// SafetyNotice carries the risk facts the caller must respect. They are
+	// advisory text, not enforcement.
+	SafetyNotice                          []string `json:"safety_notice"`
 	AbsoluteProhibitions                  []string `json:"absolute_prohibitions"`
 	MaxOperationSeconds                   int      `json:"max_operation_seconds"`
 	DefaultOutputBytes                    int      `json:"default_output_bytes"`
@@ -353,15 +339,15 @@ const (
 	FailureKindDeploymentFailed      = "binary_deployment_failed"
 	FailureKindDeploymentUnknown     = "binary_deployment_outcome_unknown"
 	// These kinds exist so a caller never has to guess which precondition
-	// failed. The deployment target is never created by the tool, and an
-	// existing sibling backup is a hard stop.
-	FailureKindDeploymentTargetNotFound = "binary_deployment_target_not_found"
-	FailureKindDeploymentBackupExists   = "binary_deployment_backup_exists"
-	FailureKindDeploymentTimeoutInvalid = "binary_deployment_timeout_invalid"
-	DeploymentStartNotRequested         = "not_requested"
-	DeploymentStartCompleted            = "completed"
-	DeploymentStartFailed               = "failed"
-	DeploymentStartOutcomeUnknown       = "outcome_unknown"
+	// failed. A missing target file is created by the tool, but a missing
+	// parent directory is a hard stop; an existing sibling backup is also one.
+	FailureKindDeploymentTargetDirectory = "binary_deployment_target_directory_missing"
+	FailureKindDeploymentBackupExists    = "binary_deployment_backup_exists"
+	FailureKindDeploymentTimeoutInvalid  = "binary_deployment_timeout_invalid"
+	DeploymentStartNotRequested          = "not_requested"
+	DeploymentStartCompleted             = "completed"
+	DeploymentStartFailed                = "failed"
+	DeploymentStartOutcomeUnknown        = "outcome_unknown"
 )
 
 type SSHBinaryDeploymentRequest struct {
@@ -504,7 +490,9 @@ func (e *Engine) DescribeExecutionSpecification(ctx context.Context, request Exe
 		Protocol:             request.Protocol,
 		PolicyVersion:        policy.Version,
 		DirectExecution:      []string{},
-		AbsoluteProhibitions: policy.HardStopRuleIDs(),
+		ExecutionPolicy:      ExecutionPolicyUnrestricted,
+		SafetyNotice:         policy.SafetyNotice(),
+		AbsoluteProhibitions: []string{},
 		MaxOperationSeconds:  0,
 		DefaultOutputBytes:   policy.DefaultMaxBytes,
 		MaxOutputBytes:       0,
@@ -581,7 +569,7 @@ func (e *Engine) RunSSH(ctx context.Context, request SSHRequest) (Result, error)
 	}
 	decision := e.evaluateSSH(ctx, policy.SSHRequest{Command: request.Command, AsRoot: request.AsRoot, Timeout: request.Timeout, MaxBytes: request.MaxBytes, CommandBlacklistPatterns: append([]string(nil), target.CommandBlacklistPatterns...)})
 	payload := bindTarget(decision.Payload, "ssh", target.IP)
-	if decision.Decision == policy.DecisionRejected || decision.Decision == policy.DecisionPermanentlyRejected {
+	if decision.Decision == policy.DecisionRejected {
 		return e.rejectedResult(ctx, "ssh", target.IP, payload, decision)
 	}
 	if decision.InteractiveInputRequired {
@@ -757,7 +745,7 @@ func (e *Engine) DeploySSHBinary(ctx context.Context, request SSHBinaryDeploymen
 			Command: deployment.StartAction, Timeout: timeout, MaxBytes: 1024,
 			CommandBlacklistPatterns: append([]string(nil), target.CommandBlacklistPatterns...),
 		})
-		if startDecision.Decision == policy.DecisionRejected || startDecision.Decision == policy.DecisionPermanentlyRejected || startDecision.InteractiveInputRequired {
+		if startDecision.Decision == policy.DecisionRejected || startDecision.InteractiveInputRequired {
 			return e.deploymentDecision(ctx, target.IP, request, decision, FailureKindDeploymentSource, "start_action_not_allowed")
 		}
 		deployment.StartAction = startDecision.Normalized
@@ -917,6 +905,11 @@ func deploymentResultMatchesRequest(remote sshtransport.BinaryDeploymentResult, 
 		return false
 	}
 	backup := remote.BackupPath
+	if remote.Created {
+		// A created target has no previous file, so a reported backup would be
+		// a false claim about rollback availability.
+		return backup == ""
+	}
 	if !isCanonicalDeploymentResultPath(backup) || backup == deployment.RemotePath || path.Dir(backup) != path.Dir(deployment.RemotePath) {
 		return false
 	}
@@ -1014,13 +1007,13 @@ func deploymentPayload(_ SSHBinaryDeploymentRequest, deployment deploymentSpec, 
 }
 
 func deploymentKnownFailure(err error) bool {
-	return errors.Is(err, sshtransport.ErrDeploymentTargetNotFound) || errors.Is(err, sshtransport.ErrDeploymentTargetSymlink) || errors.Is(err, sshtransport.ErrDeploymentTargetNotRegular) || errors.Is(err, sshtransport.ErrDeploymentTargetChanged) || errors.Is(err, sshtransport.ErrDeploymentSourceTooLarge) || errors.Is(err, sshtransport.ErrDeploymentIntegrity) || errors.Is(err, sshtransport.ErrDeploymentBackupExists) || errors.Is(err, sshtransport.ErrDeploymentActivationFailed) || errors.Is(err, sshtransport.ErrDeploymentFailed)
+	return errors.Is(err, sshtransport.ErrDeploymentTargetDirectory) || errors.Is(err, sshtransport.ErrDeploymentTargetSymlink) || errors.Is(err, sshtransport.ErrDeploymentTargetNotRegular) || errors.Is(err, sshtransport.ErrDeploymentTargetChanged) || errors.Is(err, sshtransport.ErrDeploymentSourceTooLarge) || errors.Is(err, sshtransport.ErrDeploymentIntegrity) || errors.Is(err, sshtransport.ErrDeploymentBackupExists) || errors.Is(err, sshtransport.ErrDeploymentActivationFailed) || errors.Is(err, sshtransport.ErrDeploymentFailed)
 }
 
 func deploymentFailureKind(err error) string {
 	switch {
-	case errors.Is(err, sshtransport.ErrDeploymentTargetNotFound):
-		return FailureKindDeploymentTargetNotFound
+	case errors.Is(err, sshtransport.ErrDeploymentTargetDirectory):
+		return FailureKindDeploymentTargetDirectory
 	case errors.Is(err, sshtransport.ErrDeploymentBackupExists):
 		return FailureKindDeploymentBackupExists
 	case errors.Is(err, sshtransport.ErrDeploymentSourceTooLarge):
@@ -1323,9 +1316,9 @@ func (e *Engine) ExecuteSSHSession(ctx context.Context, request ExecuteSSHSessio
 	}
 	decision := e.evaluateSSH(ctx, policy.SSHRequest{Command: request.Command, AsRoot: request.AsRoot, WorkingDirectory: session.Context.WorkingDirectory, Timeout: request.Timeout, MaxBytes: request.MaxBytes, CommandBlacklistPatterns: append([]string(nil), target.CommandBlacklistPatterns...)})
 	payload := bindTarget(decision.Payload, "ssh", target.IP) + "\nssh_session_id=" + session.ID
-	if decision.Decision == policy.DecisionRejected || decision.Decision == policy.DecisionPermanentlyRejected {
+	if decision.Decision == policy.DecisionRejected {
 		result, resultErr := e.rejectedResult(ctx, "ssh", target.IP, payload, decision)
-		return withSSHSessionHardStopHandoff(result, decision, session.Context), resultErr
+		return result, resultErr
 	}
 	if decision.InteractiveInputRequired {
 		result, resultErr := e.interactiveInputResult(ctx, "ssh", target.IP, payload, decision)
@@ -1358,15 +1351,6 @@ func (e *Engine) ExecuteSSHSession(ctx context.Context, request ExecuteSSHSessio
 		e.invalidateSSHWorkSession(session.ID)
 	}
 	return result, nil
-}
-
-func withSSHSessionHardStopHandoff(result Result, decision policy.Result, sessionContext SSHSessionContext) Result {
-	if decision.Decision != policy.DecisionPermanentlyRejected || result.HandoffCommand == "" {
-		return result
-	}
-	result.HandoffCommand = redactHandoff(sessionContext.WrapCommand(decision.Normalized))
-	result.Message = hardStopMessage(decision, result.MatchedFragment, result.HandoffCommand)
-	return result
 }
 
 func (e *Engine) CloseSSHSession(ctx context.Context, sessionID string) (SSHSessionResult, error) {
@@ -1569,7 +1553,7 @@ func (e *Engine) RunSQL(ctx context.Context, request SQLRequest) (Result, error)
 		decision.Reason = policy.ReasonTargetUnavailable
 		return e.rejectedResult(ctx, "database", targetID, payload, decision)
 	}
-	if decision.Decision == policy.DecisionRejected || decision.Decision == policy.DecisionPermanentlyRejected {
+	if decision.Decision == policy.DecisionRejected {
 		return e.rejectedResult(ctx, "database", targetID, payload, decision)
 	}
 	vault, err := e.vault()
@@ -1982,8 +1966,8 @@ var (
 	handoffSQLSecret        = regexp.MustCompile(`(?i)\b(identified\s+by\s+)("[^"]*"|'[^']*'|\S+)`)
 )
 
-// notDispatchedResult 统一表达远端尚未派发的本地决定。固定硬拦截会携带
-// 可供人工在 MCP 外执行的脱敏命令；目标命令黑名单则不会提供绕过提示。
+// notDispatchedResult 统一表达远端尚未派发的本地决定。本分支只可能因目标
+// 命令黑名单或必要前置条件停止，不再存在固定硬拦截与人工 handoff。
 func notDispatchedResult(status string, decision policy.Result, payload string) Result {
 	result := Result{
 		Status:           status,
@@ -1999,11 +1983,6 @@ func notDispatchedResult(status string, decision policy.Result, payload string) 
 		result.RuleID = decision.RuleID
 		result.MatchedFragment = redactHandoff(decision.MatchedFragment)
 		result.Message = targetCommandBlacklistMessage(result.MatchedFragment)
-	} else if decision.RuleID != "" {
-		result.RuleID = decision.RuleID
-		result.MatchedFragment = redactHandoff(decision.MatchedFragment)
-		result.HandoffCommand = redactHandoff(decision.Normalized)
-		result.Message = hardStopMessage(decision, result.MatchedFragment, result.HandoffCommand)
 	}
 	return result
 }
@@ -2020,18 +1999,6 @@ func targetCommandBlacklistMessage(matchedPattern string) string {
 func redactHandoff(value string) string {
 	value = handoffAssignmentSecret.ReplaceAllString(value, "$1$2***")
 	return handoffSQLSecret.ReplaceAllString(value, "$1***")
-}
-
-func hardStopMessage(decision policy.Result, matchedFragment, handoffCommand string) string {
-	message := fmt.Sprintf("命中硬拦截规则 %s，操作未派发。", decision.RuleID)
-	if matchedFragment != "" {
-		message += " 命中内容：" + matchedFragment + "。"
-	}
-	message += " 当前用户请求任务链内，AI 不得为达成同一效果改写、变形或重试命令；无关操作可以继续。"
-	if handoffCommand != "" {
-		message += " 以下已脱敏请求仅供人工在 MCP 外复核并执行：" + handoffCommand
-	}
-	return message
 }
 
 func withAuditFailure(result Result, auditErr error) Result {
@@ -2284,8 +2251,8 @@ func ResultMessage(status, failureKind string, decision policy.Decision, reason 
 		return "数据库账号权限不足，数据库未完成该操作。"
 	case dbtransport.FailureKindConstraint:
 		return "数据库约束拒绝了该操作。"
-	case FailureKindDeploymentTargetNotFound:
-		return "远端目标文件不存在。deploy_ssh_binary 只覆盖已存在的普通文件，不会创建新文件或目录；请先用 run_ssh 在目标目录创建占位文件，确认归属和权限后再提交部署。"
+	case FailureKindDeploymentTargetDirectory:
+		return "远端目标所在目录不存在。deploy_ssh_binary 会新建目标文件，但不会创建目录；请先用 run_ssh 确认目录并手工创建，再提交部署。"
 	case FailureKindDeploymentBackupExists:
 		return "目标同目录下已存在排他备份文件，部署在改动 live 文件前已停止。请先人工确认并清理 .ssh-mcp-backup-* 后再重试。"
 	case FailureKindDeploymentTimeoutInvalid:
@@ -2309,7 +2276,7 @@ func ResultMessage(status, failureKind string, decision policy.Decision, reason 
 	case StatusFailed:
 		return "远端已明确返回失败，未完成请求的操作。请根据 failure_kind 或数据库错误修正后重试。"
 	case StatusRejected:
-		return "请求被硬拦截规则或必要前置条件拒绝，未派发远端操作。请查看 rule_id、命中内容和中文说明。"
+		return "请求被此目标的命令黑名单或必要前置条件拒绝，未派发远端操作。本分支没有固定硬拦截规则；可用 failure_kind、reason 和命中内容确认具体原因。"
 	case StatusInteractiveInputRequired:
 		return "该命令需要交互式终端输入，SSH MCP 的非交互协议不能派发。请由人工在终端执行。"
 	case StatusUnlockRequired:
