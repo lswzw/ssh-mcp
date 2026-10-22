@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"ssh-mcp/internal/sshtransport"
 	"ssh-mcp/internal/store"
@@ -246,6 +247,72 @@ func TestDeploySSHBinaryMapsUnknownTransportOutcome(t *testing.T) {
 	if result.Status != StatusOutcomeUnknown || result.ExecutionOutcome != StatusOutcomeUnknown ||
 		!result.RemoteExecuted || deployer.calls != 1 || deps.ssh.calls != 0 {
 		t.Fatalf("unknown deployment = %#v, deployer = %#v, ssh = %#v", result, deployer, deps.ssh)
+	}
+}
+
+func TestDeploySSHBinaryReportsPreconditionFailureKinds(t *testing.T) {
+	t.Parallel()
+
+	payload := []byte("binary")
+	cases := []struct {
+		name     string
+		err      error
+		kind     string
+		contains string
+	}{
+		{"missing target", sshtransport.ErrDeploymentTargetNotFound, FailureKindDeploymentTargetNotFound, "占位"},
+		{"backup exists", sshtransport.ErrDeploymentBackupExists, FailureKindDeploymentBackupExists, "备份"},
+	}
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			deps := newFakeDependencies()
+			deployer := &fakeSSHBinaryDeployer{err: testCase.err}
+			engine := New(Dependencies{
+				Targets: deps.targets, Sessions: deps.sessions, SSH: deps.ssh,
+				Deployer: deployer, Database: deps.database, WorkSessions: deps.workSessions,
+				Audit: deps.audit, OpenTUI: deps.OpenTUI,
+			})
+			result, err := engine.DeploySSHBinary(context.Background(), SSHBinaryDeploymentRequest{
+				Target: "192.0.2.10", SourcePath: writeDeploymentSource(t, payload), RemotePath: "/srv/app/service",
+			})
+			if err != nil {
+				t.Fatalf("DeploySSHBinary() error = %v", err)
+			}
+			if result.Status != StatusFailed || result.FailureKind != testCase.kind {
+				t.Fatalf("deployment result = %#v, want failure kind %q", result, testCase.kind)
+			}
+			if !strings.Contains(result.Message, testCase.contains) {
+				t.Fatalf("deployment message = %q, want it to mention %q", result.Message, testCase.contains)
+			}
+			if !result.RemoteExecuted || deployer.calls != 1 {
+				t.Fatalf("deployment dispatch = %#v, deployer = %#v", result, deployer)
+			}
+		})
+	}
+}
+
+func TestDeploySSHBinaryRejectsOutOfRangeTimeout(t *testing.T) {
+	t.Parallel()
+
+	deps := newFakeDependencies()
+	deployer := &fakeSSHBinaryDeployer{}
+	engine := New(Dependencies{
+		Targets: deps.targets, Sessions: deps.sessions, SSH: deps.ssh,
+		Deployer: deployer, Database: deps.database, WorkSessions: deps.workSessions,
+		Audit: deps.audit, OpenTUI: deps.OpenTUI,
+	})
+	result, err := engine.DeploySSHBinary(context.Background(), SSHBinaryDeploymentRequest{
+		Target: "192.0.2.10", SourcePath: writeDeploymentSource(t, []byte("binary")),
+		RemotePath: "/srv/app/service", Timeout: MaxBinaryDeploymentTimeout + time.Second,
+	})
+	if err != nil {
+		t.Fatalf("DeploySSHBinary() error = %v", err)
+	}
+	if result.Status != StatusRejected || result.ExecutionOutcome != StatusNotDispatched || result.RemoteExecuted ||
+		result.FailureKind != FailureKindDeploymentTimeoutInvalid || deployer.calls != 0 {
+		t.Fatalf("out-of-range timeout = %#v, deployer = %#v", result, deployer)
 	}
 }
 

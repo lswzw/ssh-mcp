@@ -352,10 +352,16 @@ const (
 	FailureKindDeploymentTooLarge    = "binary_deployment_source_too_large"
 	FailureKindDeploymentFailed      = "binary_deployment_failed"
 	FailureKindDeploymentUnknown     = "binary_deployment_outcome_unknown"
-	DeploymentStartNotRequested      = "not_requested"
-	DeploymentStartCompleted         = "completed"
-	DeploymentStartFailed            = "failed"
-	DeploymentStartOutcomeUnknown    = "outcome_unknown"
+	// These kinds exist so a caller never has to guess which precondition
+	// failed. The deployment target is never created by the tool, and an
+	// existing sibling backup is a hard stop.
+	FailureKindDeploymentTargetNotFound = "binary_deployment_target_not_found"
+	FailureKindDeploymentBackupExists   = "binary_deployment_backup_exists"
+	FailureKindDeploymentTimeoutInvalid = "binary_deployment_timeout_invalid"
+	DeploymentStartNotRequested         = "not_requested"
+	DeploymentStartCompleted            = "completed"
+	DeploymentStartFailed               = "failed"
+	DeploymentStartOutcomeUnknown       = "outcome_unknown"
 )
 
 type SSHBinaryDeploymentRequest struct {
@@ -759,12 +765,17 @@ func (e *Engine) DeploySSHBinary(ctx context.Context, request SSHBinaryDeploymen
 	if deployment.RemotePath == "" || !isCanonicalDeploymentResultPath(deployment.RemotePath) {
 		return e.deploymentDecision(ctx, target.IP, request, decision, FailureKindDeploymentPath, "remote_path_invalid")
 	}
-	if maxBytes <= 0 || maxBytes > sshtransport.MaxBinaryDeploymentBytes || timeout <= 0 || timeout > MaxBinaryDeploymentTimeout {
+	if maxBytes <= 0 || maxBytes > sshtransport.MaxBinaryDeploymentBytes {
 		failureKind, reason := FailureKindDeploymentSource, "deployment_source_invalid"
 		if maxBytes > sshtransport.MaxBinaryDeploymentBytes {
 			failureKind, reason = FailureKindDeploymentTooLarge, "deployment_source_too_large"
 		}
 		return e.deploymentDecision(ctx, target.IP, request, decision, failureKind, reason)
+	}
+	// A timeout above the budget is not a source problem. Reporting it as one
+	// invites callers to "fix" the source instead of lowering timeout_seconds.
+	if timeout <= 0 || timeout > MaxBinaryDeploymentTimeout {
+		return e.deploymentDecision(ctx, target.IP, request, decision, FailureKindDeploymentTimeoutInvalid, "deployment_timeout_invalid")
 	}
 	vault, err := e.vault()
 	if errors.Is(err, store.ErrLocked) {
@@ -1008,6 +1019,10 @@ func deploymentKnownFailure(err error) bool {
 
 func deploymentFailureKind(err error) string {
 	switch {
+	case errors.Is(err, sshtransport.ErrDeploymentTargetNotFound):
+		return FailureKindDeploymentTargetNotFound
+	case errors.Is(err, sshtransport.ErrDeploymentBackupExists):
+		return FailureKindDeploymentBackupExists
 	case errors.Is(err, sshtransport.ErrDeploymentSourceTooLarge):
 		return FailureKindDeploymentTooLarge
 	case errors.Is(err, sshtransport.ErrDeploymentOutcomeUnknown):
@@ -2269,6 +2284,12 @@ func ResultMessage(status, failureKind string, decision policy.Decision, reason 
 		return "数据库账号权限不足，数据库未完成该操作。"
 	case dbtransport.FailureKindConstraint:
 		return "数据库约束拒绝了该操作。"
+	case FailureKindDeploymentTargetNotFound:
+		return "远端目标文件不存在。deploy_ssh_binary 只覆盖已存在的普通文件，不会创建新文件或目录；请先用 run_ssh 在目标目录创建占位文件，确认归属和权限后再提交部署。"
+	case FailureKindDeploymentBackupExists:
+		return "目标同目录下已存在排他备份文件，部署在改动 live 文件前已停止。请先人工确认并清理 .ssh-mcp-backup-* 后再重试。"
+	case FailureKindDeploymentTimeoutInvalid:
+		return "timeout_seconds 超出允许范围：默认 600 秒，最大 900 秒，未派发远端操作。"
 	}
 
 	switch reason {

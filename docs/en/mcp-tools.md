@@ -135,6 +135,22 @@ Atomically deploys a local file from the daemon host to a remote file path over 
 
 *If network disconnects or an error occurs during activation, `outcome_unknown` is returned. The agent must NEVER perform blind retries; humans must inspect live files and backup state.*
 
+#### Complete Contract (no other implicit limits exist):
+- `remote_path` must already exist as a regular, non-symlink file. The tool never creates files or directories; create the placeholder first with `run_ssh` (e.g. `install -m 0755 /dev/null /srv/app/app`).
+- One call transports the whole file. There is no chunk, offset, resume, or `mkdir` parameter; files above `max_bytes` must be split into explicit deployments, and every deployment re-verifies SHA-256 and reads the remote temporary file back once.
+- The server-side timeout defaults to 600 s and is capped at 900 s. **There is no fixed 60-second cap**; 60 s is `run_ssh`'s default and `read_ssh_file`'s maximum. A shorter MCP client timeout yields `binary_deployment_outcome_unknown`, which is neither success nor failure.
+- Backup names are random `.ssh-mcp-backup-*` siblings and are never cleaned up; an existing sibling backup is a hard stop.
+
+| `failure_kind` | Meaning and action |
+| :--- | :--- |
+| `binary_deployment_target_not_found` | `remote_path` does not exist. Create the placeholder; do not guess another path. |
+| `binary_deployment_backup_exists` | An exclusive sibling backup already exists and the live file was not modified. Inspect and clean up, then retry. |
+| `binary_deployment_source_invalid` | `source_path` is not a regular file, was swapped for a symlink, or `max_bytes` is invalid. |
+| `binary_deployment_source_too_large` | Source or budget exceeds 268435456 bytes. |
+| `binary_deployment_timeout_invalid` | `timeout_seconds` is ≤ 0 or > 900; nothing was dispatched. |
+| `binary_deployment_outcome_unknown` | Remote state may have changed. Verify the path and backup before any new request. |
+| `binary_deployment_failed` | Other known remote failures (symlink or non-regular target, target replaced mid-deployment, integrity mismatch, activation failed and rolled back). |
+
 ---
 
 ## 4. SSH Working Sessions

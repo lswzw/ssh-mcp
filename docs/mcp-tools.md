@@ -117,6 +117,25 @@ SSH 条目会包含 IP、端口、说明、环境、启用状态和文件操作�
 
 部署顺序是：创建同目录临时文件、传输并校验大小和 SHA-256、将旧目标移到排他备份、再激活临时文件。它不会直接覆盖 live 文件。激活或启动后如果结果无法确认，返回 `outcome_unknown`，不要自动再次部署。
 
+以下边界是工具的全部实际约束，除此之外没有隐含限制：
+
+- `remote_path` 必须已存在且为普通非符号链接文件。工具从不创建文件或目录；路径不存在时先调用 `run_ssh` 建占位文件（例如 `install -m 0755 /dev/null /srv/app/app`），再提交部署。
+- 一次调用整体传输一个文件，没有分片、偏移、续传或 `mkdir` 参数。超过 `max_bytes` 的文件只能显式拆成多次部署，每次都会重新做全量 SHA-256 校验，并额外回读一次远端临时文件。
+- 服务端超时默认 600 秒、上限 900 秒，**不存在固定的 60 秒上限**；60 秒是 `run_ssh` 的默认超时和 `read_ssh_file` 的上限。MCP 客户端自己的调用超时可能更短，此时结果是 `binary_deployment_outcome_unknown`，不是成功也不是失败。
+- 备份文件名为随机的 `.ssh-mcp-backup-*`，不会被自动清理；同目录已存在同名排他备份时部署直接硬停。
+
+可返回的 `failure_kind`：
+
+| `failure_kind` | 含义与处置 |
+| --- | --- |
+| `binary_deployment_target_not_found` | `remote_path` 不存在。先建占位文件，不要改路径蒙猜。 |
+| `binary_deployment_backup_exists` | 同目录排他备份已存在，live 文件未被改动。人工确认后清理再重试。 |
+| `binary_deployment_source_invalid` | `source_path` 不是普通文件、被符号链接替换，或 `max_bytes` 非法。 |
+| `binary_deployment_source_too_large` | 源文件或预算超过 268435456 字节。 |
+| `binary_deployment_timeout_invalid` | `timeout_seconds` ≤0 或 >900，零派发。 |
+| `binary_deployment_outcome_unknown` | 远端可能已改状态。先核验远端路径和备份，再决定是否新请求。 |
+| `binary_deployment_failed` | 远端明确失败的其余已知情况（符号链接目标、非普通文件、目标在部署中被替换、完整性校验失败、激活失败已回滚等）。 |
+
 ## SSH 工作会话
 
 工作会话保存的是 daemon 内存中的声明式上下文，不是持久 SSH Shell，也不提供 TTY、别名、函数、后台任务或交互输入。典型顺序：
