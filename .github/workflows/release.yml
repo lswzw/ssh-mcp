@@ -1,9 +1,9 @@
 name: Release
 
+# Fork notice: this branch (unrestricted) publishes no binaries.
+# Tag pushes must not produce releases here; build from source instead.
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write

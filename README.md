@@ -6,6 +6,8 @@
 
 > **Fork 声明（unrestricted 分支）**：本分支移除了上游的全部固定硬拦截规则，命令与 SQL 语义不再被本地规则拦截，命中目标命令黑名单以外的请求都会真实派发。它只适用于**单人、私有、可承受误操作**的实验环境，不跟随上游、不合并上游，也不适用于共享或多人环境。安全防线改为返回给 AI 的提示词（`mcpInstructions` 与 `describe_target_capability.safety_notice`），以及本地 TUI 中按目标配置的命令黑名单。若你需要上游的拦截模型，请使用上游分支。
 
+> **本分支不提供任何预编译二进制或 Release 产物**，仓库的 Release 工作流在该分支已被停用。请从源码自行编译：`make build`（产物在 `bin/ssh-mcp`，需要 Go 1.26.5 或更高版本）；也可用 `go build -o bin/ssh-mcp ./cmd/ssh-mcp`。上游的 AI 自动安装提示词指向上游 Release，**不适用于本分支**。
+
 **Local SSH MCP server for MCP-compatible agents | 面向 AI 运维的本地 MCP 桥接服务**
 
 `ssh-mcp` 是一个可供 **支持 MCP 的 AI Agent/客户端使用的本地 SSH MCP server**，通过 **Model Context Protocol (MCP) over stdio** 让 AI 使用你在本机登记的 Linux SSH 主机、MySQL/MariaDB 和 PostgreSQL 数据库，完成排障、查询、文件查看和文件部署。

@@ -7,6 +7,8 @@
 
 > **Fork notice (unrestricted branch)**: This branch deletes every fixed hard-stop rule. Any command or SQL that does not match the per-target command blacklist is dispatched for real. It is meant for a **single-operator, private, mistake-tolerant** environment, does not follow or merge upstream, and is unsuitable for shared or multi-tenant use. The safety contract now lives in the instructions returned to the agent (`mcpInstructions` and `describe_target_capability.safety_notice`) plus the per-target regex blacklist. Use upstream if you want the interception model.
 
+> **No prebuilt binaries or Release artifacts are published for this branch**, and the release workflow is disabled on it. Build from source: `make build` (output in `bin/ssh-mcp`, Go 1.26.5 or newer required) or `go build -o bin/ssh-mcp ./cmd/ssh-mcp`. The upstream AI install prompt points at upstream releases and **does not apply here**.
+
 **Local SSH & Database MCP Server for AI Agents (unrestricted fork)**
 
 `ssh-mcp` is a secure, local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server that bridges AI coding assistants (Claude Desktop, Cursor, Codex CLI, Cline, Windsurf, etc.) to your Linux SSH hosts, MySQL/MariaDB, and PostgreSQL databases via **MCP over stdio**.
